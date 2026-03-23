@@ -18,7 +18,9 @@ export const EVENT_EVENT_RESULT = "event_result";
  * 2. 连接成功后立即发 {"type":"subscribe","eventIds":[...],"topics":["inplay-league","league:leagueId"]}，服务端不返回 sid，直接等订阅。
  * 3. 服务端推送格式 {"type":"xxx","data":...}，按 type 分发。
  */
-export function useOddsSocket({ baseUrl, enabled, eventIds = [], leagueId = null, onOddsUpdate, onCornersCards, onInplayLeagueUpdate, onLeagueEventsUpdate, onEventResult, userId, isDebug }) {
+import { getExternalToken } from "./session";
+
+export function useOddsSocket({ baseUrl, enabled, eventIds = [], leagueId = null, onOddsUpdate, onCornersCards, onInplayLeagueUpdate, onLeagueEventsUpdate, onEventResult }) {
     const [connected, setConnected] = useState(false);
     const onOddsUpdateRef = useRef(onOddsUpdate);
     onOddsUpdateRef.current = onOddsUpdate;
@@ -48,12 +50,14 @@ export function useOddsSocket({ baseUrl, enabled, eventIds = [], leagueId = null
         (async () => {
             let token = null;
             try {
-                const params = new URLSearchParams();
-                if (isDebug !== undefined && isDebug !== null) params.set("debug", String(isDebug));
-                if (userId !== undefined && userId !== null && userId !== "") params.set("userId", String(userId));
-                const qs = params.toString();
-                const url = qs ? `${serverUrl}/api/ws/token?${qs}` : `${serverUrl}/api/ws/token`;
-                const res = await fetch(url);
+                const url = `${serverUrl}/api/ws/token`;
+                const res = await fetch(url, {
+                    credentials: "include",
+                    headers: (() => {
+                        const token = getExternalToken();
+                        return token ? { Authorization: token, "X-External-Token": token } : {};
+                    })(),
+                });
                 const json = await res.json();
                 if (json?.data?.token) token = json.data.token;
             } catch (e) {
@@ -130,7 +134,7 @@ export function useOddsSocket({ baseUrl, enabled, eventIds = [], leagueId = null
             if (ws && ws.readyState === WebSocket.OPEN) ws.close();
             setConnected(false);
         };
-    }, [baseUrl, enabled, userId, isDebug]);
+    }, [baseUrl, enabled]);
 
     // eventIds 或 leagueId 变化时重发订阅
     const lastSubscribedRef = useRef("");

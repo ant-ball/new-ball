@@ -534,7 +534,7 @@ function RollingMarketCell({ mavo, match, onAddSlip, highlight }) {
 
 export default function SoccerEarlyMarketPage() {
     const [baseUrl, setBaseUrl] = useState("https://ball.skybit.shop");
-    const [userId, setUserId] = useState("1000");
+    const [authReady, setAuthReady] = useState(false);
     const [sportId, setSportId] = useState(1);
     const [type, setType] = useState("0");
 
@@ -617,6 +617,28 @@ export default function SoccerEarlyMarketPage() {
     // 日期 Tab：0=今日，1..9=往后 9 天
     const [selectedDayIndex, setSelectedDayIndex] = useState(0);
     const selectedDayTs = getSelectedDayTimestamp(selectedDayIndex);
+
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const token = getUrlToken() || getExternalToken();
+                if (token) {
+                    persistExternalToken(token);
+                    await tokenLogin({ baseUrl, token });
+                }
+                if (!cancelled) setAuthReady(true);
+            } catch (e) {
+                console.error("token login failed", e);
+                if (!cancelled) {
+                    setError(e.message || "登录失败");
+                    setAuthReady(false);
+                }
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [baseUrl]);
 
     const matchList = useMemo(
         () => getMatchListFromOddsResponse(matchRaw, type),
@@ -756,7 +778,6 @@ export default function SoccerEarlyMarketPage() {
             });
             getLeagueGroup({
                 baseUrl,
-                userId,
                 type,
                 sportId,
                 day: type === "1" ? undefined : selectedDayTs,
@@ -804,7 +825,6 @@ export default function SoccerEarlyMarketPage() {
             if (!league?.leagueId) return;
             getBet365All({
                 baseUrl,
-                userId,
                 day: type === "1" ? undefined : selectedDayTs,
                 leagueIds: league.leagueId,
                 daysOfTime: type === "1" ? undefined : 1,
@@ -837,8 +857,6 @@ export default function SoccerEarlyMarketPage() {
                     });
                 });
         },
-        userId,
-        isDebug: true,
     });
 
     useEffect(() => {
@@ -856,7 +874,6 @@ export default function SoccerEarlyMarketPage() {
         try {
             const res = await getLeagueGroup({
                 baseUrl,
-                userId,
                 type,
                 sportId,
                 day: type === "1" ? undefined : selectedDayTs,
@@ -889,7 +906,6 @@ export default function SoccerEarlyMarketPage() {
         try {
             const res = await getBet365All({
                 baseUrl,
-                userId,
                 day: type === "1" ? undefined : selectedDayTs,
                 leagueIds: league.leagueId,
                 daysOfTime: type === "1" ? undefined : 1,
@@ -921,13 +937,13 @@ export default function SoccerEarlyMarketPage() {
     const loadAssociation = useCallback(async () => {
         if (!baseUrl) return;
         try {
-            const res = await getAssociation({ baseUrl, userId });
+            const res = await getAssociation({ baseUrl });
             const list = res?.data?.data ?? res?.data ?? [];
             setAssociationList(Array.isArray(list) ? list : []);
         } catch {
             setAssociationList([]);
         }
-    }, [baseUrl, userId]);
+    }, [baseUrl]);
 
     useEffect(() => {
         loadAssociation();
@@ -1079,7 +1095,6 @@ export default function SoccerEarlyMarketPage() {
         try {
             const res = await getOrderList({
                 baseUrl,
-                userId,
                 type: isUnsettled ? 0 : 1,
                 page: 1,
                 size: 50,
@@ -1095,7 +1110,7 @@ export default function SoccerEarlyMarketPage() {
         } finally {
             setOrderListLoading(false);
         }
-    }, [baseUrl, userId]);
+    }, [baseUrl]);
 
     const loadOrderListCurrentTab = useCallback(() => {
         loadOrderList(orderListTab);
@@ -1103,20 +1118,20 @@ export default function SoccerEarlyMarketPage() {
 
     const loadOrderFlow = useCallback(async () => {
         try {
-            const res = await getOrderFlow({ baseUrl, userId });
+            const res = await getOrderFlow({ baseUrl });
             // 后端 ok(SettlementSumVO) => { code: 0, data: vo }
             setOrderFlow(res?.data?.data ?? res?.data ?? null);
         } catch {
             setOrderFlow(null);
         }
-    }, [baseUrl, userId]);
+    }, [baseUrl]);
 
     useEffect(() => {
-        if (baseUrl && userId) {
+        if (baseUrl && authReady) {
             loadOrderList("unsettled");
             loadOrderFlow();
         }
-    }, [baseUrl, userId, loadOrderList, loadOrderFlow]);
+    }, [baseUrl, authReady, loadOrderList, loadOrderFlow]);
 
     const handleOrderListTabChange = (tab) => {
         setOrderListTab(tab);
@@ -1146,8 +1161,7 @@ export default function SoccerEarlyMarketPage() {
             if (betSlip.length === 1) {
                 const res = await createOrder({
                     baseUrl,
-                    userId,
-                    betOrder: { ...betOrderList[0] },
+                        betOrder: { ...betOrderList[0] },
                     isBestOdd: isBestOdd,
                 });
                 const code = res?.data?.code;
@@ -1159,8 +1173,7 @@ export default function SoccerEarlyMarketPage() {
             } else {
                 const res = await createContactOrder({
                     baseUrl,
-                    userId,
-                    betOrderList,
+                        betOrderList,
                     isBestOdd: isBestOdd,
                 });
                 const code = res?.data?.code;
@@ -1246,21 +1259,6 @@ export default function SoccerEarlyMarketPage() {
                         />
                     </div>
 
-                    <div>
-                        <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>userId</div>
-                        <input
-                            value={userId}
-                            onChange={(e) => setUserId(e.target.value)}
-                            style={{
-                                width: "100%",
-                                height: 40,
-                                borderRadius: 10,
-                                border: "1px solid #d1d5db",
-                                padding: "0 12px",
-                                outline: "none",
-                            }}
-                        />
-                    </div>
 
                     <div>
                         <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>运动类型</div>

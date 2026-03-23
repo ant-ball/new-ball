@@ -1,8 +1,8 @@
 // api.js
+import { getExternalToken, persistExternalToken } from "./session";
 
 const DEFAULT_BASE_URL = "https://ball.skybit.shop";
 
-/** day 支持：时间戳（毫秒，推荐，表示用户本地时区当天 0 点）或 yyyy-MM-dd 字符串；原样传给后端 */
 function normalizeDayParam(day) {
     if (day == null || day === "") return undefined;
     if (typeof day === "number" && !Number.isNaN(day)) return day;
@@ -14,81 +14,90 @@ function normalizeDayParam(day) {
 
 function buildQuery(params = {}) {
     const search = new URLSearchParams();
-
     Object.keys(params).forEach((key) => {
         const value = params[key];
         if (value !== undefined && value !== null && value !== "") {
             search.append(key, value);
         }
     });
-
     return search.toString();
 }
 
+function buildHeaders(extra = {}) {
+    const token = getExternalToken();
+    const headers = { ...extra };
+    if (token) {
+        headers.Authorization = token;
+        headers["X-External-Token"] = token;
+    }
+    return headers;
+}
+
+async function requestJson(url, options = {}) {
+    const response = await fetch(url, {
+        credentials: "include",
+        ...options,
+        headers: buildHeaders(options.headers || {}),
+    });
+    const json = await response.json();
+    return { response, json };
+}
+
+export async function tokenLogin({ baseUrl = DEFAULT_BASE_URL, token } = {}) {
+    if (!token) throw new Error("token 不能为空");
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/token-login`;
+    const body = new URLSearchParams({ token }).toString();
+    const { response, json } = await requestJson(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+    });
+    if (!response.ok || json?.code !== 0) {
+        throw new Error(json?.msg || `token 登录失败 HTTP ${response.status}`);
+    }
+    persistExternalToken(token);
+    return { url, data: json };
+}
+
 export async function getLeagueGroup({
-                                         baseUrl = DEFAULT_BASE_URL,
-                                         userId = 1000,
-                                         type = 0,
-                                         sportId = 1,
-                                         day,
-                                         daysOfTime = 1,
-                                     } = {}) {
+    baseUrl = DEFAULT_BASE_URL,
+    type = 0,
+    sportId = 1,
+    day,
+    daysOfTime = 1,
+} = {}) {
     const query = buildQuery({
-        debug: true,
-        userId,
         type,
         sportId,
         day: normalizeDayParam(day),
         daysOfTime,
     });
-
     const url = `${baseUrl}/soccer/event/league-group?${query}`;
-    const response = await fetch(url);
-
-    if (!response.ok) {
-        throw new Error(`获取联赛列表失败，HTTP ${response.status}`);
-    }
-
-    const json = await response.json();
-
-    return {
-        url,
-        data: json,
-    };
-}
-
-/** 请求时带 debug & userId，便于测试环境识别用户 */
-function authParams(userId) {
-    return { debug: true, userId: userId || "1000" };
-}
-
-/** 玩法集合：下单时 bigTypeName=bet_name, betPlayName=small_name, betPlayId=small_id；type=1 早盘 type=5 滚球 type=6 其他 */
-export async function getAssociation({ baseUrl = DEFAULT_BASE_URL, userId } = {}) {
-    const query = buildQuery(authParams(userId));
-    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/soccer/event/association?${query}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`association 失败 HTTP ${res.status}`);
-    const json = await res.json();
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`获取联赛列表失败，HTTP ${response.status}`);
     return { url, data: json };
 }
 
-/** 下单前拉取最新赔率 POST /soccer/event/new-odds */
-export async function newOdds({ baseUrl = DEFAULT_BASE_URL, userId, betOrderList = [], isBestOdd = false } = {}) {
-    const query = buildQuery(authParams(userId));
-    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/soccer/event/new-odds?${query}`;
-    const res = await fetch(url, {
+export async function getAssociation({ baseUrl = DEFAULT_BASE_URL } = {}) {
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/soccer/event/association`;
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`association 失败 HTTP ${response.status}`);
+    return { url, data: json };
+}
+
+export async function newOdds({ baseUrl = DEFAULT_BASE_URL, betOrderList = [], isBestOdd = false } = {}) {
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/soccer/event/new-odds`;
+    const { response, json } = await requestJson(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ betOrderList, isBestOdd }),
     });
-    if (!res.ok) throw new Error(`new-odds 失败 HTTP ${res.status}`);
-    const json = await res.json();
+    if (!response.ok) throw new Error(`new-odds 失败 HTTP ${response.status}`);
     return { url, data: json };
 }
 
-/** 单笔下单 POST /order/add (form) */
-export async function createOrder({ baseUrl = DEFAULT_BASE_URL, userId, betOrder, isBestOdd = false } = {}) {
-    const params = new URLSearchParams(buildQuery(authParams(userId)));
+export async function createOrder({ baseUrl = DEFAULT_BASE_URL, betOrder, isBestOdd = false } = {}) {
+    const params = new URLSearchParams();
     if (betOrder) {
         Object.entries(betOrder).forEach(([k, v]) => {
             if (v === undefined || v === null) return;
@@ -97,91 +106,63 @@ export async function createOrder({ baseUrl = DEFAULT_BASE_URL, userId, betOrder
         params.append("isBestOdd", isBestOdd ? "true" : "false");
     }
     const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/add`;
-    const res = await fetch(url, {
+    const { json } = await requestJson(url, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: params.toString(),
     });
-    const json = await res.json();
     return { url, data: json };
 }
 
-/** 串关下单 POST /order/contact/add */
-export async function createContactOrder({ baseUrl = DEFAULT_BASE_URL, userId, betOrderList = [], isBestOdd = false } = {}) {
-    const query = buildQuery(authParams(userId));
-    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/contact/add?${query}`;
-    const res = await fetch(url, {
+export async function createContactOrder({ baseUrl = DEFAULT_BASE_URL, betOrderList = [], isBestOdd = false } = {}) {
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/contact/add`;
+    const { json } = await requestJson(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ betOrderList, isBestOdd }),
     });
-    const json = await res.json();
     return { url, data: json };
 }
 
-/** 订单列表 GET /order/list  type=0 未结算  type=1 已结算(需传 day) */
-export async function getOrderList({ baseUrl = DEFAULT_BASE_URL, userId, type = 0, page = 1, size = 20, day } = {}) {
-    const q = buildQuery({ ...authParams(userId), type, page, size, day });
+export async function getOrderList({ baseUrl = DEFAULT_BASE_URL, type = 0, page = 1, size = 20, day } = {}) {
+    const q = buildQuery({ type, page, size, day });
     const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/list?${q}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`order/list 失败 HTTP ${res.status}`);
-    const json = await res.json();
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`order/list 失败 HTTP ${response.status}`);
     return { url, data: json };
 }
 
-/** 结算汇总 GET /order/flow */
-export async function getOrderFlow({ baseUrl = DEFAULT_BASE_URL, userId } = {}) {
-    const q = buildQuery(authParams(userId));
-    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/flow?${q}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`order/flow 失败 HTTP ${res.status}`);
-    const json = await res.json();
+export async function getOrderFlow({ baseUrl = DEFAULT_BASE_URL } = {}) {
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/flow`;
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`order/flow 失败 HTTP ${response.status}`);
     return { url, data: json };
 }
 
 export async function getBet365All({
-                                       baseUrl = DEFAULT_BASE_URL,
-                                       userId = 1000,
-                                       day,
-                                       leagueIds,
-                                       daysOfTime = 1,
-                                   } = {}) {
-    // 早盘、滚球都必须传 leagueIds 筛选，不传则后端返回空列表
+    baseUrl = DEFAULT_BASE_URL,
+    day,
+    leagueIds,
+    daysOfTime = 1,
+} = {}) {
     if (leagueIds == null || leagueIds === "") {
         throw new Error("leagueIds 不能为空");
     }
-
     const query = buildQuery({
-        debug: true,
-        userId,
         day: normalizeDayParam(day),
         leagueIds,
         daysOfTime,
     });
-
     const url = `${baseUrl}/soccer/event/bet365/all?${query}`;
-    const response = await fetch(url);
-
-    if (!response.ok) {
-        throw new Error(`获取比赛列表失败，HTTP ${response.status}`);
-    }
-
-    const json = await response.json();
-
-    return {
-        url,
-        data: json,
-    };
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`获取比赛列表失败，HTTP ${response.status}`);
+    return { url, data: json };
 }
 
-/** 比赛实时结果/进行时间（若有后端接口）：比分、半场、分钟秒、角球、红黄牌等 */
-export async function getMatchResult({ baseUrl = DEFAULT_BASE_URL, userId, eventId } = {}) {
+export async function getMatchResult({ baseUrl = DEFAULT_BASE_URL, eventId } = {}) {
     if (!eventId) throw new Error("eventId 不能为空");
-    const query = buildQuery(authParams(userId));
-    // 使用 bet365Id 查询结果：后端 EventResultController 暴露 /event/result/queryByBet365Id?bet365Id=...
-    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/event/result/queryByBet365Id?${query}&bet365Id=${encodeURIComponent(eventId)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`result 失败 HTTP ${res.status}`);
-    const json = await res.json();
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/event/result/queryByBet365Id?bet365Id=${encodeURIComponent(eventId)}`;
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`result 失败 HTTP ${response.status}`);
     return { url, data: json };
 }
