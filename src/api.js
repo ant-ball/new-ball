@@ -1,8 +1,5 @@
 import { getStoredBallToken } from "./auth";
 
-// api.js
-import { getExternalToken, persistExternalToken, getBallToken, persistBallToken } from "./session";
-
 const DEFAULT_BASE_URL = "https://ball.skybit.shop";
 
 function normalizeDayParam(day) {
@@ -12,16 +9,6 @@ function normalizeDayParam(day) {
     const d = typeof day === "string" && /^\d+$/.test(day) ? new Date(day.length <= 10 ? Number(day) * 1000 : Number(day)) : new Date(day);
     if (Number.isNaN(d.getTime())) return undefined;
     return d.getTime();
-}
-
-
-function authFetch(url, options = {}) {
-    const token = getStoredBallToken();
-    const headers = {
-        ...(options.headers || {}),
-        ...(token ? { Authorization: token } : {}),
-    };
-    return fetch(url, { ...options, headers });
 }
 
 function buildQuery(params = {}) {
@@ -35,48 +22,21 @@ function buildQuery(params = {}) {
     return search.toString();
 }
 
-function buildHeaders(extra = {}) {
-    const externalToken = getExternalToken();
-    const ballToken = getBallToken();
-    const headers = { ...extra };
-    if (ballToken) {
-        headers.Authorization = ballToken;
-    } else if (externalToken) {
-        headers.Authorization = externalToken;
-    }
-    if (externalToken) {
-        headers["X-External-Token"] = externalToken;
-    }
-    return headers;
+function buildAuthHeaders(extra = {}) {
+    const token = getStoredBallToken();
+    return {
+        ...(token ? { Authorization: token } : {}),
+        ...extra,
+    };
 }
 
 async function requestJson(url, options = {}) {
     const response = await fetch(url, {
-        credentials: "include",
         ...options,
-        headers: buildHeaders(options.headers || {}),
+        headers: buildAuthHeaders(options.headers || {}),
     });
     const json = await response.json();
     return { response, json };
-}
-
-export async function tokenLogin({ baseUrl = DEFAULT_BASE_URL, token } = {}) {
-    if (!token) throw new Error("token 不能为空");
-    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/token-login`;
-    const body = new URLSearchParams({ token }).toString();
-    const { response, json } = await requestJson(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-    });
-    if (!response.ok || json?.code !== 0) {
-        throw new Error(json?.msg || `token 登录失败 HTTP ${response.status}`);
-    }
-    if (json?.data) {
-        persistBallToken(json.data);
-    }
-    persistExternalToken(token);
-    return { url, data: json };
 }
 
 export async function getLeagueGroup({
@@ -156,13 +116,6 @@ export async function getOrderFlow({ baseUrl = DEFAULT_BASE_URL } = {}) {
     const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/flow`;
     const { response, json } = await requestJson(url);
     if (!response.ok) throw new Error(`order/flow 失败 HTTP ${response.status}`);
-    return { url, data: json };
-}
-
-export async function getUserBalance({ baseUrl = DEFAULT_BASE_URL } = {}) {
-    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/balance`;
-    const { response, json } = await requestJson(url);
-    if (!response.ok) throw new Error(`user/balance 失败 HTTP ${response.status}`);
     return { url, data: json };
 }
 
