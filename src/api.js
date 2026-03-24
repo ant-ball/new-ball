@@ -1,3 +1,5 @@
+import { getStoredBallToken } from "./auth";
+
 // api.js
 import { getExternalToken, persistExternalToken, getBallToken, persistBallToken } from "./session";
 
@@ -10,6 +12,16 @@ function normalizeDayParam(day) {
     const d = typeof day === "string" && /^\d+$/.test(day) ? new Date(day.length <= 10 ? Number(day) * 1000 : Number(day)) : new Date(day);
     if (Number.isNaN(d.getTime())) return undefined;
     return d.getTime();
+}
+
+
+function authFetch(url, options = {}) {
+    const token = getStoredBallToken();
+    const headers = {
+        ...(options.headers || {}),
+        ...(token ? { Authorization: token } : {}),
+    };
+    return fetch(url, { ...options, headers });
 }
 
 function buildQuery(params = {}) {
