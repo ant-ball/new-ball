@@ -19,6 +19,9 @@ function App() {
         const existingToken = getStoredBallToken();
         if (externalToken) {
           await tokenLogin(baseUrl, externalToken);
+          const clean = new URL(window.location.href);
+          clean.searchParams.delete('token');
+          window.history.replaceState({}, '', clean.pathname + (clean.search || '') + (clean.hash || ''));
         } else if (!existingToken) {
           throw new Error('缺少登录 token');
         }
