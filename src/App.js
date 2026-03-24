@@ -63,7 +63,7 @@ function App() {
           )}
         </div>
       </header>
-      <Ball />
+      {!authLoading && !authError ? <Ball /> : null}
     </div>
   );
 }
