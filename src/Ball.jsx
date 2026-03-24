@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import { getBet365All, getLeagueGroup, getAssociation, createOrder, createContactOrder, getOrderList, getOrderFlow } from "./api";
+import { getBet365All, getLeagueGroup, getAssociation, createOrder, createContactOrder, getOrderList, getOrderFlow, getUserBalance } from "./api";
 import { useOddsSocket } from "./useOddsSocket";
 
 function getMatchListFromOddsResponse(raw, matchType) {
@@ -587,6 +587,7 @@ export default function SoccerEarlyMarketPage() {
     /** 订单列表 Tab：'unsettled' 未结算，'other' 其他（结算失败+已结算） */
     const [orderListTab, setOrderListTab] = useState("unsettled");
     const [orderFlow, setOrderFlow] = useState(null);
+    const [userBalance, setUserBalance] = useState(null);
     const slipKeyRef = useRef(0);
 
     /** 玩法集合：type=1 早盘 type=5 滚球 type=6 其他；按 type -> smallId -> { betName, samllName, smallId } */
@@ -1126,12 +1127,22 @@ export default function SoccerEarlyMarketPage() {
         }
     }, [baseUrl]);
 
+    const loadUserBalance = useCallback(async () => {
+        try {
+            const res = await getUserBalance({ baseUrl });
+            setUserBalance(res?.data?.data ?? res?.data ?? null);
+        } catch {
+            setUserBalance(null);
+        }
+    }, [baseUrl]);
+
     useEffect(() => {
         if (baseUrl && authReady) {
             loadOrderList("unsettled");
             loadOrderFlow();
+            loadUserBalance();
         }
-    }, [baseUrl, authReady, loadOrderList, loadOrderFlow]);
+    }, [baseUrl, authReady, loadOrderList, loadOrderFlow, loadUserBalance]);
 
     const handleOrderListTabChange = (tab) => {
         setOrderListTab(tab);
@@ -1188,6 +1199,7 @@ export default function SoccerEarlyMarketPage() {
             setBetAmount("");
             loadOrderList(orderListTab);
             loadOrderFlow();
+            loadUserBalance();
         } catch (err) {
             const message = err?.message || "下单失败";
             setSubmitError(message);
@@ -1230,6 +1242,13 @@ export default function SoccerEarlyMarketPage() {
                     <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
                         左侧联赛，右侧比赛列表。点击联赛后自动请求 bet365/all。
                     </div>
+                    {userBalance && (
+                        <div style={{ fontSize: 13, color: "#111827", marginTop: 8, display: "flex", gap: 16, flexWrap: "wrap" }}>
+                            <span>余额: <strong>{userBalance.amount ?? 0}</strong></span>
+                            {userBalance.walletBalance != null && <span>钱包余额: <strong>{userBalance.walletBalance}</strong></span>}
+                            {userBalance.freezeAmount != null && <span>冻结: <strong>{userBalance.freezeAmount}</strong></span>}
+                        </div>
+                    )}
                 </div>
 
                 <div
@@ -1313,6 +1332,21 @@ export default function SoccerEarlyMarketPage() {
                             }}
                         >
                             {leagueLoading ? "加载中..." : "刷新联赛"}
+                        </button>
+                        <button
+                            onClick={loadUserBalance}
+                            style={{
+                                height: 40,
+                                padding: "0 18px",
+                                border: "1px solid #d1d5db",
+                                borderRadius: 10,
+                                background: "#fff",
+                                color: "#111827",
+                                cursor: "pointer",
+                                fontWeight: 600,
+                            }}
+                        >
+                            刷新余额
                         </button>
                     </div>
                 </div>
