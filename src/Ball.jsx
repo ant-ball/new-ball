@@ -621,25 +621,8 @@ export default function SoccerEarlyMarketPage() {
 
 
     useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            try {
-                const token = getUrlToken() || getExternalToken();
-                if (token) {
-                    persistExternalToken(token);
-                    await tokenLogin({ baseUrl, token });
-                }
-                if (!cancelled) setAuthReady(true);
-            } catch (e) {
-                console.error("token login failed", e);
-                if (!cancelled) {
-                    setError(e.message || "登录失败");
-                    setAuthReady(false);
-                }
-            }
-        })();
-        return () => { cancelled = true; };
-    }, [baseUrl]);
+        setAuthReady(true);
+    }, []);
 
     const matchList = useMemo(
         () => getMatchListFromOddsResponse(matchRaw, type),
