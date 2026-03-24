@@ -119,6 +119,13 @@ export async function getOrderFlow({ baseUrl = DEFAULT_BASE_URL } = {}) {
     return { url, data: json };
 }
 
+export async function getUserBalance({ baseUrl = DEFAULT_BASE_URL } = {}) {
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/balance`;
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`user/balance 失败 HTTP ${response.status}`);
+    return { url, data: json };
+}
+
 export async function getBet365All({
     baseUrl = DEFAULT_BASE_URL,
     day,
