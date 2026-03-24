@@ -1,5 +1,5 @@
 // api.js
-import { getExternalToken, persistExternalToken } from "./session";
+import { getExternalToken, persistExternalToken, getBallToken, persistBallToken } from "./session";
 
 const DEFAULT_BASE_URL = "https://ball.skybit.shop";
 
@@ -24,11 +24,16 @@ function buildQuery(params = {}) {
 }
 
 function buildHeaders(extra = {}) {
-    const token = getExternalToken();
+    const externalToken = getExternalToken();
+    const ballToken = getBallToken();
     const headers = { ...extra };
-    if (token) {
-        headers.Authorization = token;
-        headers["X-External-Token"] = token;
+    if (ballToken) {
+        headers.Authorization = ballToken;
+    } else if (externalToken) {
+        headers.Authorization = externalToken;
+    }
+    if (externalToken) {
+        headers["X-External-Token"] = externalToken;
     }
     return headers;
 }
@@ -54,6 +59,9 @@ export async function tokenLogin({ baseUrl = DEFAULT_BASE_URL, token } = {}) {
     });
     if (!response.ok || json?.code !== 0) {
         throw new Error(json?.msg || `token 登录失败 HTTP ${response.status}`);
+    }
+    if (json?.data) {
+        persistBallToken(json.data);
     }
     persistExternalToken(token);
     return { url, data: json };
