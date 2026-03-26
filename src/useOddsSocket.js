@@ -14,11 +14,10 @@ export const EVENT_EVENT_RESULT = "event_result";
 
 /**
  * 原生 WebSocket 连接 /ws/soccer：
- * 1. 先 REST GET /api/ws/token 拿 token，再带 token 连一条 WS（无 sid 握手）。
+ * 1. 直接连接 /ws/soccer（无 sid 握手、无需 token）。
  * 2. 连接成功后立即发 {"type":"subscribe","eventIds":[...],"topics":["inplay-league","league:leagueId"]}，服务端不返回 sid，直接等订阅。
  * 3. 服务端推送格式 {"type":"xxx","data":...}，按 type 分发。
  */
-import { getStoredBallToken } from "./auth";
 
 export function useOddsSocket({ baseUrl, enabled, eventIds = [], leagueId = null, onOddsUpdate, onCornersCards, onInplayLeagueUpdate, onLeagueEventsUpdate, onEventResult }) {
     const [connected, setConnected] = useState(false);
@@ -48,28 +47,11 @@ export function useOddsSocket({ baseUrl, enabled, eventIds = [], leagueId = null
         let cancelled = false;
 
         (async () => {
-            let token = null;
-            try {
-                const url = `${serverUrl}/api/ws/token`;
-                const ballToken = getStoredBallToken();
-                const res = await fetch(url, {
-                    credentials: "omit",
-                    headers: ballToken ? { Authorization: ballToken } : {},
-                });
-                const json = await res.json();
-                if (json?.data?.token) token = json.data.token;
-            } catch (e) {
-                console.warn("[useOddsSocket] 获取 ws token 失败:", e);
-            }
             if (cancelled) return;
-            if (!token) {
-                console.warn("[useOddsSocket] 无 token，不建立 WebSocket");
-                return;
-            }
 
             const wsScheme = serverUrl.startsWith("https") ? "wss" : "ws";
             const wsHost = serverUrl.replace(/^https?:\/\//, "");
-            const wsUrl = `${wsScheme}://${wsHost}/ws/soccer?token=${encodeURIComponent(token)}`;
+            const wsUrl = `${wsScheme}://${wsHost}/ws/soccer`;
             const ws = new WebSocket(wsUrl);
             wsRef.current = ws;
 
