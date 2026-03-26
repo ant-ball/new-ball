@@ -18,7 +18,7 @@ export const EVENT_EVENT_RESULT = "event_result";
  * 2. 连接成功后立即发 {"type":"subscribe","eventIds":[...],"topics":["inplay-league","league:leagueId"]}，服务端不返回 sid，直接等订阅。
  * 3. 服务端推送格式 {"type":"xxx","data":...}，按 type 分发。
  */
-import { buildAuthHeaders } from "./auth";
+import { getStoredBallToken } from "./auth";
 
 export function useOddsSocket({ baseUrl, enabled, eventIds = [], leagueId = null, onOddsUpdate, onCornersCards, onInplayLeagueUpdate, onLeagueEventsUpdate, onEventResult }) {
     const [connected, setConnected] = useState(false);
@@ -51,9 +51,10 @@ export function useOddsSocket({ baseUrl, enabled, eventIds = [], leagueId = null
             let token = null;
             try {
                 const url = `${serverUrl}/api/ws/token`;
+                const ballToken = getStoredBallToken();
                 const res = await fetch(url, {
                     credentials: "omit",
-                    headers: buildAuthHeaders(),
+                    headers: ballToken ? { Authorization: ballToken } : {},
                 });
                 const json = await res.json();
                 if (json?.data?.token) token = json.data.token;
