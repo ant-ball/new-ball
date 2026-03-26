@@ -1,13 +1,5 @@
 const BALL_TOKEN_KEY = "ball_auth_token";
 
-export function clearLegacyExternalTokenCookie() {
-  try {
-    document.cookie = "external_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
-  } catch {
-    // ignore
-  }
-}
-
 export function getStoredBallToken() {
   try {
     return localStorage.getItem(BALL_TOKEN_KEY) || "";

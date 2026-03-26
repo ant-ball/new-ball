@@ -5,14 +5,6 @@ export function getUrlToken() {
   return params.get("token") || params.get("authToken") || "";
 }
 
-export function getExternalToken() {
-  return getUrlToken();
-}
-
-export function persistExternalToken(token) {
-  return token;
-}
-
 export function persistBallToken(token) {
   if (!token) return;
   localStorage.setItem(BALL_TOKEN_KEY, token);

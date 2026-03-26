@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Ball from './Ball';
-import { clearLegacyExternalTokenCookie, fetchUserBalance, fetchUserInfo, getExternalTokenFromUrl, getStoredBallToken, tokenLogin } from './auth';
+import { fetchUserBalance, fetchUserInfo, getExternalTokenFromUrl, getStoredBallToken, tokenLogin } from './auth';
 
 function App() {
   const [baseUrl] = useState('https://ball.skybit.shop');
@@ -15,7 +15,6 @@ function App() {
       setAuthLoading(true);
       setAuthError('');
       try {
-        clearLegacyExternalTokenCookie();
         const externalToken = getExternalTokenFromUrl();
         const existingToken = getStoredBallToken();
         if (externalToken) {
