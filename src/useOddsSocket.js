@@ -53,7 +53,7 @@ export function useOddsSocket({ baseUrl, enabled, eventIds = [], leagueId = null
                 const url = `${serverUrl}/api/ws/token`;
                 const ballToken = getStoredBallToken();
                 const res = await fetch(url, {
-                    credentials: "include",
+                    credentials: "omit",
                     headers: ballToken ? { Authorization: ballToken } : {},
                 });
                 const json = await res.json();

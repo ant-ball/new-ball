@@ -33,6 +33,7 @@ function buildAuthHeaders(extra = {}) {
 async function requestJson(url, options = {}) {
     const response = await fetch(url, {
         ...options,
+        credentials: "omit",
         headers: buildAuthHeaders(options.headers || {}),
     });
     const json = await response.json();
