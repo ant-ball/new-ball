@@ -34,7 +34,7 @@ export function getExternalTokenFromUrl() {
   }
 }
 
-function buildAuthHeaders(extra = {}) {
+export function buildAuthHeaders(extra = {}) {
   const token = getStoredBallToken();
   return {
     ...(token ? { Authorization: token } : {}),
