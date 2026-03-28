@@ -1009,6 +1009,8 @@ export default function SoccerEarlyMarketPage() {
             const odRaw = pa?.od ?? pa?.OD ?? "";
             const scoreSnapshot = String(mavo?.ss ?? mavo?.SS ?? "").trim();
             const scoreLabel = scoreSnapshot ? `(${scoreSnapshot})` : "";
+            const selectionLabel = getInplaySelectionLabel(pa);
+            const selectionLabelText = selectionLabel ? ` ${selectionLabel}` : "";
             setBetSlip((prev) => {
                 const nextItem = {
                     key: `in_${eventIdStr}_${mavoIdVal}_${paIdVal}_${slipKeyRef.current++}`,
@@ -1021,7 +1023,7 @@ export default function SoccerEarlyMarketPage() {
                     timeType: 1,
                     oddingId: String(paIdVal),
                     paId: mavoIdVal != null ? String(mavoIdVal) : "",
-                    handicap: (pa?.ha ?? pa?.HA) != null ? String(pa.ha ?? pa.HA) : "",
+                    handicap: selectionLabel,
                     odds: odDecimal,
                     oddsMarkets: "inplay",
                     betPlayId,
@@ -1029,7 +1031,7 @@ export default function SoccerEarlyMarketPage() {
                     bigTypeName,
                     at_time: atTime,
                     timeStr,
-                    selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${scoreLabel} ${(pa?.na ?? pa?.pNa ?? pa?.NA) ?? ""} ${betOrderHandicapText(pa)} @${odRaw}`,
+                    selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${scoreLabel}${selectionLabelText} @${odRaw}`,
                 };
                 const next = [...prev, nextItem];
                 if (hasDuplicateEventIdInSlip(next)) {
@@ -1044,10 +1046,13 @@ export default function SoccerEarlyMarketPage() {
 
     const removeFromSlip = (key) => setBetSlip((prev) => prev.filter((x) => x.key !== key));
 
-    const betOrderHandicapText = (pa) => {
+    const getInplaySelectionLabel = (pa) => {
         const handicap = pa?.ha ?? pa?.HA;
-        if (handicap == null || handicap === "") return "";
-        return `(${handicap})`;
+        if (handicap != null && String(handicap).trim() !== "") {
+            return String(handicap).trim();
+        }
+        const selection = pa?.na ?? pa?.NA ?? pa?.pNa ?? "";
+        return selection != null ? String(selection).trim() : "";
     };
 
     const hasDuplicateEventIdInSlip = (slip) => {
@@ -1974,14 +1979,14 @@ export default function SoccerEarlyMarketPage() {
                                         {order.contactVO && order.contactVO.length > 0 ? (
                                             order.contactVO.map((c, i) => (
                                                 <div key={i} style={{ color: "#6b7280", marginTop: 4 }}>
-                                                    {c.event?.homeNameCN} vs {c.event?.awayNameCN} {c.betPlayName}{c.handicap ? ` ${c.handicap}` : ""} @{c.odds}
+                                                    {c.event?.homeNameCN} vs {c.event?.awayNameCN} {(c.betPlayName || "").replace(/_/g, " ")}{c.handicap ? ` ${c.handicap}` : ""} @{c.odds}
                                                     {c.whenTheScore ? <span style={{ color: "#dc2626" }}> · 当时比分: {c.whenTheScore}</span> : null}
                                                 </div>
                                             ))
                                         ) : (
                                             <div style={{ color: "#6b7280" }}>
                                                 单笔
-                                                {order.handicap ? ` ${order.handicap}` : ""}
+                                                {(order.betPlayName || "").replace(/_/g, " ")}{order.handicap ? ` ${order.handicap}` : ""}
                                                 {order.whenTheScore ? <span style={{ color: "#dc2626" }}> · 当时比分: {order.whenTheScore}</span> : null}
                                             </div>
                                         )}
