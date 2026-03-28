@@ -1027,7 +1027,7 @@ export default function SoccerEarlyMarketPage() {
                     bigTypeName,
                     at_time: atTime,
                     timeStr,
-                    selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""} ${(pa?.na ?? pa?.pNa ?? pa?.NA) ?? ""} @${odRaw}`,
+                    selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""} ${(pa?.na ?? pa?.pNa ?? pa?.NA) ?? ""} ${betOrderHandicapText(pa)} @${odRaw}`,
                 };
                 const next = [...prev, nextItem];
                 if (hasDuplicateEventIdInSlip(next)) {
@@ -1041,6 +1041,12 @@ export default function SoccerEarlyMarketPage() {
     }, [associationMap, setSubmitError]);
 
     const removeFromSlip = (key) => setBetSlip((prev) => prev.filter((x) => x.key !== key));
+
+    const betOrderHandicapText = (pa) => {
+        const handicap = pa?.ha ?? pa?.HA;
+        if (handicap == null || handicap === "") return "";
+        return `(${handicap})`;
+    };
 
     const hasDuplicateEventIdInSlip = (slip) => {
         const seen = new Set();
@@ -1966,13 +1972,14 @@ export default function SoccerEarlyMarketPage() {
                                         {order.contactVO && order.contactVO.length > 0 ? (
                                             order.contactVO.map((c, i) => (
                                                 <div key={i} style={{ color: "#6b7280", marginTop: 4 }}>
-                                                    {c.event?.homeNameCN} vs {c.event?.awayNameCN} {c.betPlayName} @{c.odds}
+                                                    {c.event?.homeNameCN} vs {c.event?.awayNameCN} {c.betPlayName}{c.handicap ? ` ${c.handicap}` : ""} @{c.odds}
                                                     {c.whenTheScore ? <span style={{ color: "#dc2626" }}> · 当时比分: {c.whenTheScore}</span> : null}
                                                 </div>
                                             ))
                                         ) : (
                                             <div style={{ color: "#6b7280" }}>
                                                 单笔
+                                                {order.handicap ? ` ${order.handicap}` : ""}
                                                 {order.whenTheScore ? <span style={{ color: "#dc2626" }}> · 当时比分: {order.whenTheScore}</span> : null}
                                             </div>
                                         )}
