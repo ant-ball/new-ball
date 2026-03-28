@@ -396,6 +396,7 @@ const MAIN_MARKET_KEYS = [
     { key: "43_correct_score", label: "波胆" },
     { key: "1579_half_time_result", label: "半场胜平负" },
     { key: "10257_half_time_double_chance", label: "半场双重机会" },
+    { key: "42_half_time_full_time", label: "半&全场" },
 ];
 
 /** 新加坡时间当天 0 点的毫秒时间戳 */
@@ -977,6 +978,7 @@ export default function SoccerEarlyMarketPage() {
                     oddsMarkets: marketKey,
                     at_time: atTime,
                     timeStr,
+                    teamType: item.name != null && String(item.name).trim() !== "" ? String(item.name).trim() : (item.handicap != null ? String(item.handicap).trim() : ""),
                     selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${label} ${item.name != null ? item.name : item.handicap} @${item.odds}`,
                 };
                 const next = [...prev, nextItem];
@@ -1029,6 +1031,7 @@ export default function SoccerEarlyMarketPage() {
                     bigTypeName,
                     at_time: atTime,
                     timeStr,
+                    teamType: selectionLabel ? String(selectionLabel).trim() : "",
                     selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
                 };
                 const next = [...prev, nextItem];
@@ -1051,6 +1054,22 @@ export default function SoccerEarlyMarketPage() {
         }
         const selection = pa?.na ?? pa?.NA ?? pa?.pNa ?? "";
         return selection != null ? String(selection).trim() : "";
+    };
+
+    const isScoreMarketOrder = (betPlayId, betPlayName, oddsMarkets) => {
+        const marketId = String(betPlayId || "");
+        const name = `${betPlayName || ""} ${oddsMarkets || ""}`.toLowerCase();
+        return (
+            marketId === "43" ||
+            marketId === "10001" ||
+            marketId === "10540" ||
+            marketId === "10561" ||
+            marketId === "50591" ||
+            marketId === "50275" ||
+            name.includes("correct_score") ||
+            name.includes("final score") ||
+            name.includes("波胆")
+        );
     };
 
     const hasDuplicateEventIdInSlip = (slip) => {
@@ -1076,6 +1095,7 @@ export default function SoccerEarlyMarketPage() {
             betPlayId: item.betPlayId ?? "",
             betPlayName: item.betPlayName ?? "",
             bigTypeName: item.bigTypeName ?? "",
+            teamType: item.teamType ?? "",
             // 下单接口 time/timeStr 用赔率里的 at_time，timeStr 与 time 同一值
             time: item.at_time ?? undefined,
             timeStr: item.timeStr ?? (item.at_time != null ? String(item.at_time) : ""),
@@ -1976,15 +1996,20 @@ export default function SoccerEarlyMarketPage() {
                                         </div>
                                         {order.contactVO && order.contactVO.length > 0 ? (
                                             order.contactVO.map((c, i) => (
+                                                (() => {
+                                                    const selectionText = c.teamType || c.handicap || "";
+                                                    return (
                                                 <div key={i} style={{ color: "#6b7280", marginTop: 4 }}>
-                                                    {c.event?.homeNameCN} vs {c.event?.awayNameCN} {(c.betPlayName || "").replace(/_/g, " ")}{c.handicap ? ` ${c.handicap}` : ""} @{c.odds}
+                                                    {c.event?.homeNameCN} vs {c.event?.awayNameCN} {(c.betPlayName || "").replace(/_/g, " ")}{selectionText ? ` ${selectionText}` : ""} @{c.odds}
                                                     {c.whenTheScore ? <span style={{ color: "#dc2626" }}> · 当时比分: {c.whenTheScore}</span> : null}
                                                 </div>
+                                                    );
+                                                })()
                                             ))
                                         ) : (
                                             <div style={{ color: "#6b7280" }}>
                                                 单笔
-                                                {(order.betPlayName || "").replace(/_/g, " ")}{order.handicap ? ` ${order.handicap}` : ""}
+                                                {(order.betPlayName || "").replace(/_/g, " ")}{(order.teamType || order.handicap || "") ? ` ${order.teamType || order.handicap || ""}` : ""}
                                                 {order.whenTheScore ? <span style={{ color: "#dc2626" }}> · 当时比分: {order.whenTheScore}</span> : null}
                                             </div>
                                         )}
