@@ -1967,10 +1967,14 @@ export default function SoccerEarlyMarketPage() {
                                             order.contactVO.map((c, i) => (
                                                 <div key={i} style={{ color: "#6b7280", marginTop: 4 }}>
                                                     {c.event?.homeNameCN} vs {c.event?.awayNameCN} {c.betPlayName} @{c.odds}
+                                                    {c.whenTheScore ? <span style={{ color: "#dc2626" }}> · 当时比分: {c.whenTheScore}</span> : null}
                                                 </div>
                                             ))
                                         ) : (
-                                            <div style={{ color: "#6b7280" }}>单笔</div>
+                                            <div style={{ color: "#6b7280" }}>
+                                                单笔
+                                                {order.whenTheScore ? <span style={{ color: "#dc2626" }}> · 当时比分: {order.whenTheScore}</span> : null}
+                                            </div>
                                         )}
                                     </div>
                                 ))
