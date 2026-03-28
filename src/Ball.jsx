@@ -1007,6 +1007,8 @@ export default function SoccerEarlyMarketPage() {
             const eventIdStr = String(match.id ?? match.bet365Id ?? "");
             const bet365IdStr = String(match.bet365Id ?? match.id ?? "");
             const odRaw = pa?.od ?? pa?.OD ?? "";
+            const scoreSnapshot = String(mavo?.ss ?? mavo?.SS ?? "").trim();
+            const scoreLabel = scoreSnapshot ? `(${scoreSnapshot})` : "";
             setBetSlip((prev) => {
                 const nextItem = {
                     key: `in_${eventIdStr}_${mavoIdVal}_${paIdVal}_${slipKeyRef.current++}`,
@@ -1027,7 +1029,7 @@ export default function SoccerEarlyMarketPage() {
                     bigTypeName,
                     at_time: atTime,
                     timeStr,
-                    selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""} ${(pa?.na ?? pa?.pNa ?? pa?.NA) ?? ""} ${betOrderHandicapText(pa)} @${odRaw}`,
+                    selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${scoreLabel} ${(pa?.na ?? pa?.pNa ?? pa?.NA) ?? ""} ${betOrderHandicapText(pa)} @${odRaw}`,
                 };
                 const next = [...prev, nextItem];
                 if (hasDuplicateEventIdInSlip(next)) {
