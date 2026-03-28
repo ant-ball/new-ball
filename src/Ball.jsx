@@ -1048,10 +1048,6 @@ export default function SoccerEarlyMarketPage() {
     const removeFromSlip = (key) => setBetSlip((prev) => prev.filter((x) => x.key !== key));
 
     const getInplaySelectionLabel = (pa) => {
-        const handicap = pa?.ha ?? pa?.HA;
-        if (handicap != null && String(handicap).trim() !== "") {
-            return String(handicap).trim();
-        }
         const selection = pa?.na ?? pa?.NA ?? pa?.pNa ?? "";
         return selection != null ? String(selection).trim() : "";
     };
