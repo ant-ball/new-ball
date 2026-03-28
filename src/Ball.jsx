@@ -1060,6 +1060,8 @@ export default function SoccerEarlyMarketPage() {
         const marketId = String(betPlayId || "");
         const name = `${betPlayName || ""} ${oddsMarkets || ""}`.toLowerCase();
         return (
+            marketId === "40" ||
+            marketId === "42" ||
             marketId === "43" ||
             marketId === "10001" ||
             marketId === "10540" ||
