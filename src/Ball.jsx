@@ -1009,7 +1009,6 @@ export default function SoccerEarlyMarketPage() {
             const odRaw = pa?.od ?? pa?.OD ?? "";
             const selectionLabel = getInplaySelectionLabel(pa);
             const selectionLabelText = selectionLabel ? ` ${selectionLabel}` : "";
-            const scoreMarket = isScoreMarket(playSmallId, betPlayName, mavo);
             setBetSlip((prev) => {
                 const nextItem = {
                     key: `in_${eventIdStr}_${mavoIdVal}_${paIdVal}_${slipKeyRef.current++}`,
@@ -1022,7 +1021,7 @@ export default function SoccerEarlyMarketPage() {
                     timeType: 1,
                     oddingId: String(paIdVal),
                     paId: mavoIdVal != null ? String(mavoIdVal) : "",
-                    handicap: scoreMarket ? selectionLabel : ((pa?.ha ?? pa?.HA) != null ? String(pa.ha ?? pa.HA) : ""),
+                    handicap: (pa?.ha ?? pa?.HA) != null ? String(pa.ha ?? pa.HA) : "",
                     odds: odDecimal,
                     oddsMarkets: "inplay",
                     betPlayId,
@@ -1030,9 +1029,7 @@ export default function SoccerEarlyMarketPage() {
                     bigTypeName,
                     at_time: atTime,
                     timeStr,
-                    selectionText: scoreMarket
-                        ? `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${selectionLabelText} @${odRaw}`
-                        : `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
+                    selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
                 };
                 const next = [...prev, nextItem];
                 if (hasDuplicateEventIdInSlip(next)) {
@@ -1054,22 +1051,6 @@ export default function SoccerEarlyMarketPage() {
         }
         const selection = pa?.na ?? pa?.NA ?? pa?.pNa ?? "";
         return selection != null ? String(selection).trim() : "";
-    };
-
-    const isScoreMarket = (playSmallId, betPlayName, mavo) => {
-        const marketId = String(playSmallId || "");
-        const name = `${betPlayName || ""} ${mavo?.na || mavo?.NA || ""}`.toLowerCase();
-        return (
-            marketId === "43" ||
-            marketId === "10001" ||
-            marketId === "10540" ||
-            marketId === "10561" ||
-            marketId === "50591" ||
-            marketId === "50275" ||
-            name.includes("correct_score") ||
-            name.includes("final score") ||
-            name.includes("波胆")
-        );
     };
 
     const hasDuplicateEventIdInSlip = (slip) => {
