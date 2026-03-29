@@ -372,7 +372,7 @@ function normalizeResultCode(value, homeName, awayName) {
     const away = normalizeNameToken(awayName);
     if (home && token === home) return "1";
     if (away && token === away) return "2";
-    return raw;
+    return "";
 }
 
 function normalizeHomeAwayCode(value, homeName, awayName) {
@@ -385,7 +385,7 @@ function normalizeHomeAwayCode(value, homeName, awayName) {
     const away = normalizeNameToken(awayName);
     if (home && token === home) return "1";
     if (away && token === away) return "2";
-    return raw;
+    return "";
 }
 
 function normalizeOverUnderCode(value) {
@@ -394,7 +394,7 @@ function normalizeOverUnderCode(value) {
     const token = normalizeNameToken(raw);
     if (token.startsWith("over") || token === "大" || token === "大球") return "Over";
     if (token.startsWith("under") || token === "小" || token === "小球") return "Under";
-    return raw;
+    return "";
 }
 
 function normalizeDoubleChanceCode(value) {
@@ -404,7 +404,7 @@ function normalizeDoubleChanceCode(value) {
     if (["1&X", "X&1", "1X"].includes(token)) return "1&X";
     if (["1&2", "2&1", "12"].includes(token)) return "1&2";
     if (["2&X", "X&2", "2X", "X2"].includes(token)) return "2&X";
-    return raw;
+    return "";
 }
 
 function normalizeHalfFullTimeCode(value, homeName, awayName) {
@@ -412,7 +412,7 @@ function normalizeHalfFullTimeCode(value, homeName, awayName) {
     if (!raw) return "";
     const parts = raw.split(/[\/&-]/).map((part) => normalizeResultCode(part, homeName, awayName)).filter(Boolean);
     if (parts.length === 2) return `${parts[0]}&${parts[1]}`;
-    return raw;
+    return "";
 }
 
 function buildCanonicalTeamType({ betPlayId, rawSelection, homeName, awayName }) {
@@ -1314,6 +1314,19 @@ export default function SoccerEarlyMarketPage() {
     };
 
     const slipToBetOrder = (item) => {
+        const canonicalTeamType = item.type === "inplay"
+            ? buildCanonicalTeamType({
+                betPlayId: item.betPlayId,
+                rawSelection: item?.pa?.pNa ?? item?.pa?.n2 ?? item?.pa?.N2 ?? item?.pa?.na ?? item?.pa?.NA ?? getInplaySelectionLabel(item?.pa),
+                homeName: getHomeName(item?.match),
+                awayName: getAwayName(item?.match),
+            })
+            : buildCanonicalTeamType({
+                betPlayId: item.betPlayId,
+                rawSelection: item?.item?.team ?? item?.item?.header ?? item?.item?.name ?? item?.item?.handicap ?? "",
+                homeName: getHomeName(item?.match),
+                awayName: getAwayName(item?.match),
+            });
         const base = {
             eventId: item.eventId,
             bet365Id: item.bet365Id,
@@ -1325,7 +1338,7 @@ export default function SoccerEarlyMarketPage() {
             betPlayId: item.betPlayId ?? "",
             betPlayName: item.betPlayName ?? "",
             bigTypeName: item.bigTypeName ?? "",
-            teamType: item.teamType ?? "",
+            teamType: canonicalTeamType || "",
             // 下单接口 time/timeStr 用赔率里的 at_time，timeStr 与 time 同一值
             time: item.at_time ?? undefined,
             timeStr: item.timeStr ?? (item.at_time != null ? String(item.at_time) : ""),
