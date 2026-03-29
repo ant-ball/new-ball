@@ -344,6 +344,75 @@ function getMatchTime(match) {
     });
 }
 
+function findCurrentMatch(matchRaw, slipItem) {
+    const matchList = getMatchListFromOddsResponse(matchRaw, slipItem?.type === "inplay" ? 1 : 0);
+    const targetEventId = String(slipItem?.eventId ?? "");
+    const targetBet365Id = String(slipItem?.bet365Id ?? "");
+    return matchList.find((match) => {
+        const eventId = String(match?.id ?? "");
+        const bet365Id = String(match?.bet365Id ?? match?.id ?? "");
+        return (targetEventId && eventId === targetEventId) || (targetBet365Id && bet365Id === targetBet365Id);
+    }) || null;
+}
+
+function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
+    if (!slipItem || !matchRaw) return slipItem;
+    const currentMatch = findCurrentMatch(matchRaw, slipItem);
+    if (!currentMatch) return slipItem;
+
+    if (slipItem.type === "pre") {
+        const oddsMap = currentMatch?.odds ?? {};
+        const marketKey = slipItem.marketKey;
+        const oddsObj = marketKey ? oddsMap?.[marketKey] : null;
+        const currentItem = Array.isArray(oddsObj?.odds)
+            ? oddsObj.odds.find((it) => String(it?.id ?? "") === String(slipItem?.oddingId ?? ""))
+            : null;
+        if (!currentItem) {
+            return { ...slipItem, match: currentMatch };
+        }
+        const atTime = oddsObj?.updateAt ?? oddsObj?.at_time ?? currentItem?.updateAt ?? currentItem?.at_time ?? slipItem.at_time ?? null;
+        const nextOdds = parseFloat(currentItem?.odds);
+        return {
+            ...slipItem,
+            match: currentMatch,
+            item: currentItem,
+            oddsObj,
+            odds: Number.isFinite(nextOdds) ? nextOdds : slipItem.odds,
+            handicap: currentItem?.handicap != null ? String(currentItem.handicap) : (slipItem.handicap ?? ""),
+            teamType: currentItem?.name != null && String(currentItem.name).trim() !== ""
+                ? String(currentItem.name).trim()
+                : (currentItem?.handicap != null ? String(currentItem.handicap).trim() : (slipItem.teamType ?? "")),
+            at_time: atTime,
+            timeStr: atTime != null ? String(atTime) : "",
+            selectionText: `${getHomeName(currentMatch)} vs ${getAwayName(currentMatch)} ${slipItem.label} ${currentItem?.name != null ? currentItem.name : currentItem?.handicap} @${currentItem?.odds}`,
+        };
+    }
+
+    const tree = Array.isArray(currentMatch?.treeResults) ? currentMatch.treeResults : [];
+    const currentMavo = tree.find((m) => String(m?.id ?? m?.ID ?? "") === String(slipItem?.paId ?? ""));
+    const currentPa = currentMavo?.co?.flatMap((c) => c?.pa || []).find((pa) => String(pa?.id ?? pa?.ID ?? "") === String(slipItem?.oddingId ?? ""));
+    if (!currentMavo || !currentPa) {
+        return { ...slipItem, match: currentMatch };
+    }
+    const atTime = currentMavo?.updateAt ?? currentMavo?.UpdateAt ?? slipItem.at_time ?? null;
+    const odRaw = currentPa?.od ?? currentPa?.OD ?? "";
+    const odDecimal = inplayOddsToDecimal(odRaw);
+    const selectionLabel = getInplaySelectionLabel(currentPa);
+    const selectionLabelText = selectionLabel ? ` ${selectionLabel}` : "";
+    return {
+        ...slipItem,
+        match: currentMatch,
+        mavo: currentMavo,
+        pa: currentPa,
+        odds: odDecimal != null ? odDecimal : slipItem.odds,
+        handicap: (currentPa?.ha ?? currentPa?.HA) != null ? String(currentPa?.ha ?? currentPa?.HA) : (slipItem.handicap ?? ""),
+        teamType: selectionLabel ? String(selectionLabel).trim() : (slipItem.teamType ?? ""),
+        at_time: atTime,
+        timeStr: atTime != null ? String(atTime) : "",
+        selectionText: `${getHomeName(currentMatch)} vs ${getAwayName(currentMatch)} ${currentMavo?.na ?? currentMavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
+    };
+}
+
 function getScore(match) {
     if (match?.score) return match.score;
     if (match?.ballScore != null && typeof match.ballScore === "string") return match.ballScore;
@@ -1174,14 +1243,15 @@ export default function SoccerEarlyMarketPage() {
         }
         setSubmitLoading(true);
         try {
-            const betOrderList = betSlip.map((s) => {
+            const refreshedSlip = betSlip.map((s) => refreshSlipItemFromCurrentOdds(s, matchRaw));
+            const betOrderList = refreshedSlip.map((s) => {
                 const order = { ...slipToBetOrder(s), betAmount: amount };
                 if (s.type === "inplay" && (!order.bet365Id || !order.paId)) {
                     console.warn("[下单] 滚球单缺少 bet365Id 或 paId", { slipItem: s, order });
                 }
                 return order;
             });
-            if (betSlip.length === 1) {
+            if (refreshedSlip.length === 1) {
                 const res = await createOrder({
                     baseUrl,
                         betOrder: { ...betOrderList[0] },
