@@ -632,9 +632,10 @@ export default function SoccerEarlyMarketPage() {
     /** WS 推送控制台：最近 N 条。每项 { id, ts, type, ... }，type 为 in_play_odds_update | inplay_league | league */
     const [wsOddsConsoleLog, setWsOddsConsoleLog] = useState([]);
     const WS_CONSOLE_MAX = 30;
-    /** 控制台筛选项：topic（in_play_odds_update / inplay_league / league）、eventId（主要筛滚球赔率） */
+    /** 控制台筛选项：topic（in_play_odds_update / inplay_league / league）、eventId / maId（主要筛滚球赔率） */
     const [wsConsoleFilterTopic, setWsConsoleFilterTopic] = useState("");
     const [wsConsoleFilterEventId, setWsConsoleFilterEventId] = useState("");
+    const [wsConsoleFilterMaId, setWsConsoleFilterMaId] = useState("");
     const wsConsoleIdRef = useRef(0);
     /** 向控制台插入一条（新条在最前，用自增 id 保证时间顺序） */
     const pushWsConsole = useCallback((entry) => {
@@ -1893,6 +1894,16 @@ export default function SoccerEarlyMarketPage() {
                                                 style={{ marginLeft: 4, padding: "4px 8px", fontSize: 12, width: 100, border: "1px solid #d1d5db", borderRadius: 6 }}
                                             />
                                         </label>
+                                        <label style={{ fontSize: 12, color: "#6b7280" }}>
+                                            maId
+                                            <input
+                                                type="text"
+                                                value={wsConsoleFilterMaId}
+                                                onChange={(e) => setWsConsoleFilterMaId(e.target.value)}
+                                                placeholder="筛玩法"
+                                                style={{ marginLeft: 4, padding: "4px 8px", fontSize: 12, width: 88, border: "1px solid #d1d5db", borderRadius: 6 }}
+                                            />
+                                        </label>
                                         <button
                                             type="button"
                                             onClick={() => setWsOddsConsoleLog([])}
@@ -1909,7 +1920,12 @@ export default function SoccerEarlyMarketPage() {
                                         const id = entry.eventId != null ? String(entry.eventId) : "";
                                         return id.includes(wsConsoleFilterEventId.trim());
                                     };
-                                    const filtered = wsOddsConsoleLog.filter((e) => topicOk(e) && eventIdOk(e));
+                                    const maIdOk = (entry) => {
+                                        if (!wsConsoleFilterMaId.trim()) return true;
+                                        const id = entry.maId != null ? String(entry.maId) : "";
+                                        return id.includes(wsConsoleFilterMaId.trim());
+                                    };
+                                    const filtered = wsOddsConsoleLog.filter((e) => topicOk(e) && eventIdOk(e) && maIdOk(e));
                                     return filtered.length === 0 ? (
                                         <div style={{ fontSize: 12, color: "#9ca3af" }}>
                                             {wsOddsConsoleLog.length === 0 ? "暂无推送记录，连接后收到推送会在此显示" : "无符合筛选条件的记录"}
