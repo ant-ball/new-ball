@@ -277,6 +277,11 @@ function getAwayName(match) {
     );
 }
 
+function getInplaySelectionLabel(pa) {
+    const selection = pa?.na ?? pa?.NA ?? pa?.nA ?? pa?.pNa ?? pa?.n2 ?? pa?.N2 ?? "";
+    return selection != null ? String(selection).trim() : "";
+}
+
 /** 解析 TU（Bet365 结果数据，UTC 时间 YYYYMMDDHHmmss）为 UTC 毫秒时间戳 */
 function parseTUToUtcMs(tuStr) {
     if (tuStr == null || String(tuStr).length < 14) return null;
@@ -1115,11 +1120,6 @@ export default function SoccerEarlyMarketPage() {
     }, [associationMap, setSubmitError]);
 
     const removeFromSlip = (key) => setBetSlip((prev) => prev.filter((x) => x.key !== key));
-
-    const getInplaySelectionLabel = (pa) => {
-        const selection = pa?.na ?? pa?.NA ?? pa?.pNa ?? "";
-        return selection != null ? String(selection).trim() : "";
-    };
 
     const isScoreMarketOrder = (betPlayId, betPlayName, oddsMarkets) => {
         const marketId = String(betPlayId || "");
