@@ -419,9 +419,9 @@ function buildCanonicalTeamType({ betPlayId, rawSelection, homeName, awayName })
     const marketId = String(betPlayId ?? "").trim();
     const selection = String(rawSelection ?? "").trim();
     if (!selection) return "";
-    if (marketId === "40" || marketId === "1579") return normalizeResultCode(selection, homeName, awayName);
-    if (marketId === "938") return normalizeHomeAwayCode(selection, homeName, awayName);
-    if (marketId === "981" || marketId === "10143") return normalizeOverUnderCode(selection);
+    if (marketId === "40" || marketId === "1579" || marketId === "1777") return normalizeResultCode(selection, homeName, awayName);
+    if (marketId === "938" || marketId === "12") return normalizeHomeAwayCode(selection, homeName, awayName);
+    if (marketId === "981" || marketId === "10143" || marketId === "421") return normalizeOverUnderCode(selection);
     if (marketId === "43" || marketId === "10001") return selection;
     if (marketId === "42") return normalizeHalfFullTimeCode(selection, homeName, awayName);
     if (marketId === "10257") return normalizeDoubleChanceCode(selection);
