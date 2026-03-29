@@ -612,7 +612,7 @@ function inplayOddsToDecimal(od) {
     const s = String(od).trim();
     const parts = s.split("/").map((p) => parseFloat(p.trim()));
     if (parts.length !== 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1]) || parts[1] === 0) return null;
-    return Math.round((parts[0] / parts[1] + 1) * 100) / 100;
+    return Math.floor((parts[0] / parts[1] + 1) * 100) / 100;
 }
 
 // 主要玩法展示顺序（bet365 风格）
