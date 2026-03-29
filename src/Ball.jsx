@@ -716,7 +716,10 @@ export default function SoccerEarlyMarketPage() {
         lastProcessedRef.current = { key: dedupeKey, ts: now };
 
         if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
-        if (mergeTimerRef.current) clearTimeout(mergeTimerRef.current);
+        if (mergeTimerRef.current) {
+            clearTimeout(mergeTimerRef.current);
+            mergeTimerRef.current = null;
+        }
 
         setMatchRaw((prev) => {
             const changedPaIds = getChangedPaIds(prev, normalized);
@@ -728,15 +731,10 @@ export default function SoccerEarlyMarketPage() {
                     maId: normalized.id,
                     changedPaIds,
                 });
-                mergeTimerRef.current = setTimeout(() => {
-                    setMatchRaw((p) => mergeMavoIntoMatchRaw(p, normalized));
-                    mergeTimerRef.current = null;
-                    highlightTimerRef.current = setTimeout(() => {
-                        setHighlight(null);
-                        highlightTimerRef.current = null;
-                    }, 300);
-                }, 200);
-                // 先高亮，200ms 后再更新赔率，再 300ms 后取消高亮
+                highlightTimerRef.current = setTimeout(() => {
+                    setHighlight(null);
+                    highlightTimerRef.current = null;
+                }, 500);
             }
 
             const oddsStrs = (normalized?.co ?? [])
@@ -755,7 +753,7 @@ export default function SoccerEarlyMarketPage() {
                 mergeSuccess: true,
             });
 
-            return changedPaIds.length > 0 ? prev : merged;
+            return merged;
         });
     };
 
@@ -1291,6 +1289,22 @@ export default function SoccerEarlyMarketPage() {
             setSubmitLoading(false);
         }
     };
+
+    useEffect(() => {
+        if (betSlip.length === 0) return;
+        setBetSlip((prev) => {
+            const refreshed = prev.map((item) => refreshSlipItemFromCurrentOdds(item, matchRaw));
+            const changed = refreshed.some((item, idx) => item !== prev[idx] && (
+                item.selectionText !== prev[idx]?.selectionText ||
+                item.odds !== prev[idx]?.odds ||
+                item.handicap !== prev[idx]?.handicap ||
+                item.at_time !== prev[idx]?.at_time ||
+                item.timeStr !== prev[idx]?.timeStr ||
+                item.teamType !== prev[idx]?.teamType
+            ));
+            return changed ? refreshed : prev;
+        });
+    }, [matchRaw, betSlip.length]);
 
     const parlayOdds = useMemo(() => {
         if (betSlip.length === 0) return 0;
