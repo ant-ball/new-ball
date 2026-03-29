@@ -29,7 +29,7 @@ function normalizeMavoFromWs(mavo) {
     if (!mavo || typeof mavo !== "object") return mavo;
     const MAVO_KEYS = { ID: "id", NA: "na", iD: "id", nA: "na", CN: "cn", DO: "do", FI: "fi", IT: "it", SU: "su", SS: "ss", TM: "tm", TS: "ts", TU: "tu", TT: "tt", CP: "cp" };
     const COVO_KEYS = { CN: "cn", NA: "na", cN: "cn", nA: "na" };
-    const PAVO_KEYS = { ID: "id", NA: "na", OD: "od", nA: "na", oD: "od", HA: "ha", FI: "fi", IT: "it", N2: "n2", SU: "su", HD: "hd", BS: "bs" };
+    const PAVO_KEYS = { ID: "id", iD: "id", NA: "na", nA: "na", OD: "od", oD: "od", HA: "ha", hA: "ha", FI: "fi", fI: "fi", IT: "it", iT: "it", N2: "n2", n2: "n2", SU: "su", sU: "su", HD: "hd", hD: "hd", BS: "bs", bS: "bs", pNa: "pNa" };
 
     function addLowerAliases(obj, keyMap) {
         if (!obj || typeof obj !== "object") return;
@@ -241,6 +241,81 @@ function mergeMavoPaIntoExisting(existingMavo, pushMavo) {
         UpdateAt: pushMavo.UpdateAt ?? pushMavo.updateAt ?? existingMavo.UpdateAt ?? existingMavo.updateAt,
         co: newCo.length > 0 ? newCo : (pushMavo.co || existingMavo.co),
     };
+}
+
+function toComparableUpdateAt(mavo) {
+    const raw = mavo?.updateAt ?? mavo?.UpdateAt;
+    if (raw == null || raw === "") return -1;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : -1;
+}
+
+function mergeTreeResultsPreferNewer(existingTree, incomingTree) {
+    const existing = Array.isArray(existingTree) ? existingTree : [];
+    const incoming = Array.isArray(incomingTree) ? incomingTree : [];
+    if (existing.length === 0) return incoming;
+    if (incoming.length === 0) return existing;
+
+    const incomingById = new Map();
+    incoming.forEach((mavo) => {
+        const id = mavo?.id ?? mavo?.ID;
+        if (id != null) incomingById.set(String(id), mavo);
+    });
+
+    const merged = existing.map((oldMavo) => {
+        const id = oldMavo?.id ?? oldMavo?.ID;
+        if (id == null) return oldMavo;
+        const nextMavo = incomingById.get(String(id));
+        if (!nextMavo) return oldMavo;
+        incomingById.delete(String(id));
+        return toComparableUpdateAt(nextMavo) >= toComparableUpdateAt(oldMavo) ? nextMavo : oldMavo;
+    });
+
+    incomingById.forEach((mavo) => merged.push(mavo));
+    return merged;
+}
+
+function mergeMatchRawPreferNewer(prevRaw, nextRaw) {
+    if (!prevRaw) return nextRaw;
+    if (!nextRaw) return prevRaw;
+
+    const prevData = prevRaw?.data?.data ?? prevRaw?.data ?? prevRaw;
+    const nextData = nextRaw?.data?.data ?? nextRaw?.data ?? nextRaw;
+    const prevInPlay = Array.isArray(prevData?.inPlay) ? prevData.inPlay : null;
+    const nextInPlay = Array.isArray(nextData?.inPlay) ? nextData.inPlay : null;
+    if (!prevInPlay || !nextInPlay) return nextRaw;
+
+    const prevByMatchId = new Map();
+    prevInPlay.forEach((group) => {
+        (group?.value ?? []).forEach((match) => {
+            const id = match?.id ?? match?.bet365Id;
+            if (id != null) prevByMatchId.set(String(id), match);
+        });
+    });
+
+    const mergedInPlay = nextInPlay.map((group) => {
+        const value = Array.isArray(group?.value) ? group.value : [];
+        const mergedValue = value.map((match) => {
+            const id = match?.id ?? match?.bet365Id;
+            if (id == null) return match;
+            const prevMatch = prevByMatchId.get(String(id));
+            if (!prevMatch) return match;
+            return {
+                ...match,
+                treeResults: mergeTreeResultsPreferNewer(prevMatch?.treeResults, match?.treeResults),
+            };
+        });
+        return { ...group, value: mergedValue };
+    });
+
+    const mergedData = { ...nextData, inPlay: mergedInPlay };
+    if (nextRaw.data?.data) {
+        return { ...nextRaw, data: { ...nextRaw.data, data: mergedData } };
+    }
+    if (nextRaw.data) {
+        return { ...nextRaw, data: { ...nextRaw.data, ...mergedData } };
+    }
+    return { ...nextRaw, ...mergedData };
 }
 
 function getMatchKey(match, index) {
@@ -888,7 +963,7 @@ export default function SoccerEarlyMarketPage() {
                 daysOfTime: type === "1" ? undefined : 1,
             })
                 .then((res) => {
-                    setMatchRaw({
+                    setMatchRaw((prev) => mergeMatchRawPreferNewer(prev, {
                         request: {
                             leagueName: league.leagueName ?? "",
                             leagueId: league.leagueId ?? "",
@@ -896,7 +971,7 @@ export default function SoccerEarlyMarketPage() {
                             daysOfTime: type === "1" ? undefined : 1,
                         },
                         ...res,
-                    });
+                    }));
                     const apiInPlay = res?.data?.inPlay ?? res?.data?.data?.inPlay ?? res?.inPlay;
                     const apiCount = Array.isArray(apiInPlay) ? apiInPlay.reduce((a, g) => a + (Array.isArray(g?.value) ? g.value.length : 0), 0) : 0;
                     pushWsConsole({
@@ -969,7 +1044,7 @@ export default function SoccerEarlyMarketPage() {
                 daysOfTime: type === "1" ? undefined : 1,
             });
 
-            setMatchRaw({
+            setMatchRaw((prev) => mergeMatchRawPreferNewer(prev, {
                 request: {
                     leagueName: league.leagueName ?? "",
                     leagueId: league.leagueId ?? "",
@@ -977,7 +1052,7 @@ export default function SoccerEarlyMarketPage() {
                     daysOfTime: type === "1" ? undefined : 1,
                 },
                 ...res,
-            });
+            }));
         } catch (err) {
             setError(err.message || "获取比赛列表失败");
             setMatchRaw(null);
