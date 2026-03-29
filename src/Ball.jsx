@@ -357,6 +357,77 @@ function getInplaySelectionLabel(pa) {
     return selection != null ? String(selection).trim() : "";
 }
 
+function normalizeNameToken(value) {
+    return String(value ?? "").toLowerCase().replace(/\s+/g, "").replace(/[()]/g, "").trim();
+}
+
+function normalizeResultCode(value, homeName, awayName) {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    const token = normalizeNameToken(raw);
+    if (["1", "home", "主", "主队"].includes(token)) return "1";
+    if (["2", "away", "客", "客队"].includes(token)) return "2";
+    if (["x", "draw", "tie", "平", "平局"].includes(token)) return "X";
+    const home = normalizeNameToken(homeName);
+    const away = normalizeNameToken(awayName);
+    if (home && token === home) return "1";
+    if (away && token === away) return "2";
+    return raw;
+}
+
+function normalizeHomeAwayCode(value, homeName, awayName) {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    const token = normalizeNameToken(raw);
+    if (["1", "home", "主", "主队"].includes(token)) return "1";
+    if (["2", "away", "客", "客队"].includes(token)) return "2";
+    const home = normalizeNameToken(homeName);
+    const away = normalizeNameToken(awayName);
+    if (home && token === home) return "1";
+    if (away && token === away) return "2";
+    return raw;
+}
+
+function normalizeOverUnderCode(value) {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    const token = normalizeNameToken(raw);
+    if (token.startsWith("over") || token === "大" || token === "大球") return "Over";
+    if (token.startsWith("under") || token === "小" || token === "小球") return "Under";
+    return raw;
+}
+
+function normalizeDoubleChanceCode(value) {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    const token = raw.toUpperCase().replace(/\s+/g, "").replace(/[\/-]/g, "&");
+    if (["1&X", "X&1", "1X"].includes(token)) return "1&X";
+    if (["1&2", "2&1", "12"].includes(token)) return "1&2";
+    if (["2&X", "X&2", "2X", "X2"].includes(token)) return "2&X";
+    return raw;
+}
+
+function normalizeHalfFullTimeCode(value, homeName, awayName) {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    const parts = raw.split(/[\/&-]/).map((part) => normalizeResultCode(part, homeName, awayName)).filter(Boolean);
+    if (parts.length === 2) return `${parts[0]}&${parts[1]}`;
+    return raw;
+}
+
+function buildCanonicalTeamType({ betPlayId, rawSelection, homeName, awayName }) {
+    const marketId = String(betPlayId ?? "").trim();
+    const selection = String(rawSelection ?? "").trim();
+    if (!selection) return "";
+    if (marketId === "40" || marketId === "1579") return normalizeResultCode(selection, homeName, awayName);
+    if (marketId === "938") return normalizeHomeAwayCode(selection, homeName, awayName);
+    if (marketId === "981" || marketId === "10143") return normalizeOverUnderCode(selection);
+    if (marketId === "43" || marketId === "10001") return selection;
+    if (marketId === "42") return normalizeHalfFullTimeCode(selection, homeName, awayName);
+    if (marketId === "10257") return normalizeDoubleChanceCode(selection);
+    return selection;
+}
+
 /** 解析 TU（Bet365 结果数据，UTC 时间 YYYYMMDDHHmmss）为 UTC 毫秒时间戳 */
 function parseTUToUtcMs(tuStr) {
     if (tuStr == null || String(tuStr).length < 14) return null;
@@ -459,9 +530,12 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
             oddsObj,
             odds: Number.isFinite(nextOdds) ? nextOdds : slipItem.odds,
             handicap: currentItem?.handicap != null ? String(currentItem.handicap) : (slipItem.handicap ?? ""),
-            teamType: currentItem?.name != null && String(currentItem.name).trim() !== ""
-                ? String(currentItem.name).trim()
-                : (currentItem?.handicap != null ? String(currentItem.handicap).trim() : (slipItem.teamType ?? "")),
+            teamType: buildCanonicalTeamType({
+                betPlayId: slipItem?.betPlayId,
+                rawSelection: currentItem?.team ?? currentItem?.header ?? currentItem?.name ?? currentItem?.handicap ?? "",
+                homeName: getHomeName(currentMatch),
+                awayName: getAwayName(currentMatch),
+            }) || (slipItem.teamType ?? ""),
             at_time: atTime,
             timeStr: atTime != null ? String(atTime) : "",
             selectionText: `${getHomeName(currentMatch)} vs ${getAwayName(currentMatch)} ${slipItem.label} ${currentItem?.name != null ? currentItem.name : currentItem?.handicap} @${currentItem?.odds}`,
@@ -486,7 +560,12 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
         pa: currentPa,
         odds: odDecimal != null ? odDecimal : slipItem.odds,
         handicap: (currentPa?.ha ?? currentPa?.HA) != null ? String(currentPa?.ha ?? currentPa?.HA) : (slipItem.handicap ?? ""),
-        teamType: selectionLabel ? String(selectionLabel).trim() : (slipItem.teamType ?? ""),
+        teamType: buildCanonicalTeamType({
+            betPlayId: slipItem?.betPlayId,
+            rawSelection: currentPa?.pNa ?? currentPa?.n2 ?? currentPa?.N2 ?? currentPa?.na ?? currentPa?.NA ?? selectionLabel,
+            homeName: getHomeName(currentMatch),
+            awayName: getAwayName(currentMatch),
+        }) || (slipItem.teamType ?? ""),
         at_time: atTime,
         timeStr: atTime != null ? String(atTime) : "",
         selectionText: `${getHomeName(currentMatch)} vs ${getAwayName(currentMatch)} ${currentMavo?.na ?? currentMavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
@@ -1126,7 +1205,12 @@ export default function SoccerEarlyMarketPage() {
                     oddsMarkets: marketKey,
                     at_time: atTime,
                     timeStr,
-                    teamType: item.name != null && String(item.name).trim() !== "" ? String(item.name).trim() : (item.handicap != null ? String(item.handicap).trim() : ""),
+                    teamType: buildCanonicalTeamType({
+                        betPlayId,
+                        rawSelection: item.team ?? item.header ?? item.name ?? item.handicap ?? "",
+                        homeName: getHomeName(match),
+                        awayName: getAwayName(match),
+                    }),
                     selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${label} ${item.name != null ? item.name : item.handicap} @${item.odds}`,
                 };
                 const next = [...prev, nextItem];
@@ -1179,7 +1263,12 @@ export default function SoccerEarlyMarketPage() {
                     bigTypeName,
                     at_time: atTime,
                     timeStr,
-                    teamType: selectionLabel ? String(selectionLabel).trim() : "",
+                    teamType: buildCanonicalTeamType({
+                        betPlayId,
+                        rawSelection: pa?.pNa ?? pa?.n2 ?? pa?.N2 ?? pa?.na ?? pa?.NA ?? selectionLabel,
+                        homeName: getHomeName(match),
+                        awayName: getAwayName(match),
+                    }),
                     selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
                 };
                 const next = [...prev, nextItem];
