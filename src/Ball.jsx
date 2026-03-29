@@ -330,8 +330,9 @@ function getMatchKey(match, index) {
 
 function getHomeName(match) {
     return (
-        match?.homeNameCN ||
+        match?.oHomeName ||
         match?.homeNameEN ||
+        match?.homeNameCN ||
         match?.homeTeamName ||
         match?.homeName ||
         match?.team1Name ||
@@ -342,8 +343,9 @@ function getHomeName(match) {
 
 function getAwayName(match) {
     return (
-        match?.awayNameCN ||
+        match?.oAwayName ||
         match?.awayNameEN ||
+        match?.awayNameCN ||
         match?.awayTeamName ||
         match?.awayName ||
         match?.team2Name ||
