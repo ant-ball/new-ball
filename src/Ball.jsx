@@ -358,7 +358,12 @@ function getInplaySelectionLabel(pa) {
 }
 
 function normalizeNameToken(value) {
-    return String(value ?? "").toLowerCase().replace(/\s+/g, "").replace(/[()]/g, "").trim();
+    return String(value ?? "")
+        .toLowerCase()
+        .replace(/\([^)]*\)/g, "")
+        .replace(/\s+/g, "")
+        .replace(/[()]/g, "")
+        .trim();
 }
 
 function normalizeResultCode(value, homeName, awayName) {
@@ -415,13 +420,27 @@ function normalizeHalfFullTimeCode(value, homeName, awayName) {
     return "";
 }
 
-function buildCanonicalTeamType({ betPlayId, rawSelection, homeName, awayName }) {
+function buildCanonicalTeamType({ betPlayId, rawSelection, homeName, awayName, optionOrder }) {
     const marketId = String(betPlayId ?? "").trim();
     const selection = String(rawSelection ?? "").trim();
+    const order = optionOrder != null ? String(optionOrder).trim() : "";
+    if (marketId === "40" || marketId === "1579" || marketId === "1777") {
+        if (order === "0") return "1";
+        if (order === "1") return "X";
+        if (order === "2") return "2";
+        return selection ? normalizeResultCode(selection, homeName, awayName) : "";
+    }
+    if (marketId === "938" || marketId === "12") {
+        if (order === "0") return "1";
+        if (order === "1") return "2";
+        return selection ? normalizeHomeAwayCode(selection, homeName, awayName) : "";
+    }
+    if (marketId === "981" || marketId === "10143" || marketId === "421") {
+        if (order === "0") return "Over";
+        if (order === "1") return "Under";
+        return selection ? normalizeOverUnderCode(selection) : "";
+    }
     if (!selection) return "";
-    if (marketId === "40" || marketId === "1579" || marketId === "1777") return normalizeResultCode(selection, homeName, awayName);
-    if (marketId === "938" || marketId === "12") return normalizeHomeAwayCode(selection, homeName, awayName);
-    if (marketId === "981" || marketId === "10143" || marketId === "421") return normalizeOverUnderCode(selection);
     if (marketId === "43" || marketId === "10001") return selection;
     if (marketId === "42") return normalizeHalfFullTimeCode(selection, homeName, awayName);
     if (marketId === "10257") return normalizeDoubleChanceCode(selection);
@@ -535,6 +554,7 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
                 rawSelection: currentItem?.team ?? currentItem?.header ?? currentItem?.name ?? currentItem?.handicap ?? "",
                 homeName: getHomeName(currentMatch),
                 awayName: getAwayName(currentMatch),
+                optionOrder: currentItem?.or ?? currentItem?.OR,
             }) || (slipItem.teamType ?? ""),
             at_time: atTime,
             timeStr: atTime != null ? String(atTime) : "",
@@ -565,6 +585,7 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
             rawSelection: currentPa?.pNa ?? currentPa?.n2 ?? currentPa?.N2 ?? currentPa?.na ?? currentPa?.NA ?? selectionLabel,
             homeName: getHomeName(currentMatch),
             awayName: getAwayName(currentMatch),
+            optionOrder: currentPa?.or ?? currentPa?.OR,
         }) || (slipItem.teamType ?? ""),
         at_time: atTime,
         timeStr: atTime != null ? String(atTime) : "",
@@ -1268,6 +1289,7 @@ export default function SoccerEarlyMarketPage() {
                         rawSelection: pa?.pNa ?? pa?.n2 ?? pa?.N2 ?? pa?.na ?? pa?.NA ?? selectionLabel,
                         homeName: getHomeName(match),
                         awayName: getAwayName(match),
+                        optionOrder: pa?.or ?? pa?.OR,
                     }),
                     selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
                 };
@@ -1320,12 +1342,14 @@ export default function SoccerEarlyMarketPage() {
                 rawSelection: item?.pa?.pNa ?? item?.pa?.n2 ?? item?.pa?.N2 ?? item?.pa?.na ?? item?.pa?.NA ?? getInplaySelectionLabel(item?.pa),
                 homeName: getHomeName(item?.match),
                 awayName: getAwayName(item?.match),
+                optionOrder: item?.pa?.or ?? item?.pa?.OR,
             })
             : buildCanonicalTeamType({
                 betPlayId: item.betPlayId,
                 rawSelection: item?.item?.team ?? item?.item?.header ?? item?.item?.name ?? item?.item?.handicap ?? "",
                 homeName: getHomeName(item?.match),
                 awayName: getAwayName(item?.match),
+                optionOrder: item?.item?.or ?? item?.item?.OR,
             });
         const base = {
             eventId: item.eventId,
