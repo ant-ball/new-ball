@@ -200,6 +200,24 @@ function mergeMavoIntoMatchRaw(prevRaw, mavo) {
 /** 将推送的 mavo 的 co[].pa 赔率合并进已有 mavo，保留已有选项结构，只更新匹配到的 pa 的 od/ha/na 等；若推送里没有对应 co/pa 则保留原值 */
 function mergeMavoPaIntoExisting(existingMavo, pushMavo) {
     if (!existingMavo || !pushMavo) return existingMavo;
+    const marketId = String(pushMavo.id ?? pushMavo.ID ?? existingMavo.id ?? existingMavo.ID ?? "");
+    if (marketId === "10001") {
+        const pushCo = Array.isArray(pushMavo.co) ? pushMavo.co : [];
+        return {
+            ...existingMavo,
+            ...pushMavo,
+            id: pushMavo.id ?? pushMavo.ID ?? existingMavo.id ?? existingMavo.ID,
+            ID: pushMavo.ID ?? pushMavo.id ?? existingMavo.ID ?? existingMavo.id,
+            na: pushMavo.na ?? pushMavo.NA ?? existingMavo.na ?? existingMavo.NA,
+            NA: pushMavo.NA ?? pushMavo.na ?? existingMavo.NA ?? existingMavo.na,
+            updateAt: pushMavo.updateAt ?? pushMavo.UpdateAt ?? existingMavo.updateAt ?? existingMavo.UpdateAt,
+            UpdateAt: pushMavo.UpdateAt ?? pushMavo.updateAt ?? existingMavo.UpdateAt ?? existingMavo.updateAt,
+            co: pushCo.map((co) => ({
+                ...co,
+                pa: Array.isArray(co?.pa) ? co.pa.map((pa) => ({ ...pa })) : [],
+            })),
+        };
+    }
     const existingCo = Array.isArray(existingMavo.co) ? existingMavo.co : [];
     const pushCo = Array.isArray(pushMavo.co) ? pushMavo.co : [];
     if (pushCo.length === 0) return existingMavo;
@@ -1225,7 +1243,6 @@ export default function SoccerEarlyMarketPage() {
                     betPlayId,
                     betPlayName,
                     bigTypeName,
-                    oddsMarkets: marketKey,
                     at_time: atTime,
                     timeStr,
                     teamType: buildCanonicalTeamType({
@@ -1280,7 +1297,6 @@ export default function SoccerEarlyMarketPage() {
                     paId: mavoIdVal != null ? String(mavoIdVal) : "",
                     handicap: (pa?.ha ?? pa?.HA) != null ? String(pa.ha ?? pa.HA) : "",
                     odds: odDecimal,
-                    oddsMarkets: "inplay",
                     betPlayId,
                     betPlayName,
                     bigTypeName,
@@ -1369,7 +1385,9 @@ export default function SoccerEarlyMarketPage() {
             time: item.at_time ?? undefined,
             timeStr: item.timeStr ?? (item.at_time != null ? String(item.at_time) : ""),
         };
-        if (item.type === "inplay") base.paId = item.paId ?? "";
+        if (item.type === "inplay") {
+            base.paId = item.paId ?? "";
+        }
         return base;
     };
 
