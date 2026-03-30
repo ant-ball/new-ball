@@ -1,5 +1,17 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import { getBet365All, getLeagueGroup, getAssociation, createOrder, createContactOrder, getOrderList, getOrderFlow, getUserBalance } from "./api";
+import {
+    getBet365All,
+    getLeagueGroup,
+    getAssociation,
+    createOrder,
+    createContactOrder,
+    getOrderList,
+    getOrderFlow,
+    getUserBalance,
+    queryTransferWalletTypes,
+    queryTransferWalletBalance,
+    submitTransfer,
+} from "./api";
 import { useOddsSocket } from "./useOddsSocket";
 
 function getMatchListFromOddsResponse(raw, matchType) {
@@ -859,6 +871,17 @@ export default function SoccerEarlyMarketPage() {
     const [orderListTab, setOrderListTab] = useState("unsettled");
     const [orderFlow, setOrderFlow] = useState(null);
     const [userBalance, setUserBalance] = useState(null);
+    const [transferVisible, setTransferVisible] = useState(false);
+    const [transferLoadingTypes, setTransferLoadingTypes] = useState(false);
+    const [transferLoadingBalance, setTransferLoadingBalance] = useState(false);
+    const [transferSubmitting, setTransferSubmitting] = useState(false);
+    const [transferWalletTypes, setTransferWalletTypes] = useState([]);
+    const [transferFixedWalletType, setTransferFixedWalletType] = useState("OPTIONS");
+    const [transferFixedWalletName, setTransferFixedWalletName] = useState("足球账户");
+    const [transferFromWalletType, setTransferFromWalletType] = useState("");
+    const [transferBalance, setTransferBalance] = useState(null);
+    const [transferAmount, setTransferAmount] = useState("");
+    const [transferError, setTransferError] = useState("");
     const slipKeyRef = useRef(0);
 
     /** 玩法集合：type=1 早盘 type=5 滚球 type=6 其他；按 type -> smallId -> { betName, samllName, smallId } */
@@ -1437,6 +1460,114 @@ export default function SoccerEarlyMarketPage() {
         }
     }, [baseUrl]);
 
+    const loadTransferBalance = useCallback(async (walletType) => {
+        if (!walletType) {
+            setTransferBalance(null);
+            return;
+        }
+        try {
+            setTransferLoadingBalance(true);
+            const res = await queryTransferWalletBalance({ baseUrl, walletType });
+            setTransferBalance(res?.data?.data ?? res?.data ?? null);
+        } catch {
+            setTransferBalance(null);
+        } finally {
+            setTransferLoadingBalance(false);
+        }
+    }, [baseUrl]);
+
+    const loadTransferTypes = useCallback(async () => {
+        try {
+            setTransferLoadingTypes(true);
+            const res = await queryTransferWalletTypes({ baseUrl });
+            const data = res?.data?.data ?? res?.data ?? {};
+            const walletTypes = Array.isArray(data?.walletTypes) ? data.walletTypes : [];
+            const leftTypes = walletTypes.filter((item) => item && item.selectable !== false && String(item.walletType || "").toUpperCase() !== "OPTIONS");
+            const fixedType = data?.fixedWalletType || "OPTIONS";
+            const fixedName = data?.fixedWalletName || "足球账户";
+            const defaultLeft = leftTypes[0]?.walletType || "";
+            setTransferWalletTypes(leftTypes);
+            setTransferFixedWalletType(fixedType);
+            setTransferFixedWalletName(fixedName);
+            setTransferFromWalletType(defaultLeft);
+            setTransferAmount("");
+            setTransferError("");
+            setTransferBalance(null);
+            if (defaultLeft) {
+                await loadTransferBalance(defaultLeft);
+            }
+        } catch {
+            setTransferWalletTypes([]);
+            setTransferFixedWalletType("OPTIONS");
+            setTransferFixedWalletName("足球账户");
+            setTransferFromWalletType("");
+            setTransferBalance(null);
+        } finally {
+            setTransferLoadingTypes(false);
+        }
+    }, [baseUrl, loadTransferBalance]);
+
+    const openTransferModal = useCallback(() => {
+        setTransferVisible(true);
+    }, []);
+
+    const closeTransferModal = useCallback(() => {
+        setTransferVisible(false);
+        setTransferLoadingTypes(false);
+        setTransferLoadingBalance(false);
+        setTransferSubmitting(false);
+        setTransferWalletTypes([]);
+        setTransferFixedWalletType("OPTIONS");
+        setTransferFixedWalletName("足球账户");
+        setTransferFromWalletType("");
+        setTransferBalance(null);
+        setTransferAmount("");
+        setTransferError("");
+    }, []);
+
+    const handleTransferFromChange = useCallback((walletType) => {
+        setTransferFromWalletType(walletType);
+        setTransferError("");
+        loadTransferBalance(walletType);
+    }, [loadTransferBalance]);
+
+    const handleTransferSubmit = useCallback(async () => {
+        const amount = Number(transferAmount);
+        if (!transferFromWalletType) {
+            setTransferError("请选择划出账户");
+            return;
+        }
+        if (!Number.isFinite(amount) || amount <= 0) {
+            setTransferError("请输入有效划转金额");
+            return;
+        }
+        setTransferError("");
+        try {
+            setTransferSubmitting(true);
+            const res = await submitTransfer({
+                baseUrl,
+                fromWalletType: transferFromWalletType,
+                toWalletType: transferFixedWalletType,
+                coinType: "USDT",
+                amount,
+            });
+            const body = res?.data ?? {};
+            if (body?.code != null && String(body.code) !== "0") {
+                throw new Error(body?.msg || "划转失败");
+            }
+            setTransferVisible(false);
+            setTransferAmount("");
+            setTransferBalance(null);
+            setTransferFromWalletType("");
+            setTransferWalletTypes([]);
+            loadUserBalance();
+        } catch (err) {
+            setTransferError(err?.message || "划转失败");
+        } finally {
+            setTransferSubmitting(false);
+        }
+    }, [baseUrl, loadUserBalance, transferAmount, transferFixedWalletType, transferFromWalletType]);
+
     useEffect(() => {
         if (baseUrl && authReady) {
             loadOrderList("unsettled");
@@ -1444,6 +1575,14 @@ export default function SoccerEarlyMarketPage() {
             loadUserBalance();
         }
     }, [baseUrl, authReady, loadOrderList, loadOrderFlow, loadUserBalance]);
+
+    useEffect(() => {
+        if (transferVisible) {
+            loadTransferTypes();
+        } else {
+            setTransferWalletTypes([]);
+        }
+    }, [transferVisible, loadTransferTypes]);
 
     const handleOrderListTabChange = (tab) => {
         setOrderListTab(tab);
@@ -1561,10 +1700,26 @@ export default function SoccerEarlyMarketPage() {
                         左侧联赛，右侧比赛列表。点击联赛后自动请求 bet365/all。
                     </div>
                     {userBalance && (
-                        <div style={{ fontSize: 13, color: "#111827", marginTop: 8, display: "flex", gap: 16, flexWrap: "wrap" }}>
+                        <div style={{ fontSize: 13, color: "#111827", marginTop: 8, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                             <span>余额: <strong>{userBalance.amount ?? 0}</strong></span>
                             {userBalance.walletBalance != null && <span>钱包余额: <strong>{userBalance.walletBalance}</strong></span>}
                             {userBalance.freezeAmount != null && <span>冻结: <strong>{userBalance.freezeAmount}</strong></span>}
+                            <button
+                                onClick={openTransferModal}
+                                style={{
+                                    height: 30,
+                                    padding: "0 14px",
+                                    border: "1px solid #111827",
+                                    borderRadius: 999,
+                                    background: "#111827",
+                                    color: "#fff",
+                                    cursor: "pointer",
+                                    fontWeight: 600,
+                                    fontSize: 12,
+                                }}
+                            >
+                                划转
+                            </button>
                         </div>
                     )}
                 </div>
@@ -2233,8 +2388,190 @@ export default function SoccerEarlyMarketPage() {
                                 })()}
                             </div>
                         )}
+                </div>
+            </div>
+
+            {transferVisible && (
+                <div
+                    role="presentation"
+                    onClick={closeTransferModal}
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        background: "rgba(15, 23, 42, 0.55)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        zIndex: 2000,
+                        padding: 16,
+                    }}
+                >
+                    <div
+                        role="presentation"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            width: "min(560px, 100%)",
+                            background: "#0f172a",
+                            color: "#e5e7eb",
+                            borderRadius: 20,
+                            padding: 20,
+                            boxShadow: "0 24px 80px rgba(15, 23, 42, 0.55)",
+                            border: "1px solid rgba(148, 163, 184, 0.18)",
+                        }}
+                    >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+                            <div style={{ fontSize: 18, fontWeight: 700 }}>划转</div>
+                            <button
+                                onClick={closeTransferModal}
+                                style={{
+                                    border: "none",
+                                    background: "transparent",
+                                    color: "#fff",
+                                    fontSize: 22,
+                                    cursor: "pointer",
+                                    lineHeight: 1,
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 48px 1fr", gap: 14, alignItems: "center" }}>
+                            <div>
+                                <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>从</div>
+                                <select
+                                    value={transferFromWalletType}
+                                    onChange={(e) => handleTransferFromChange(e.target.value)}
+                                    disabled={transferLoadingTypes}
+                                    style={{
+                                        width: "100%",
+                                        height: 42,
+                                        borderRadius: 12,
+                                        border: "1px solid #334155",
+                                        background: "#111827",
+                                        color: "#e5e7eb",
+                                        padding: "0 12px",
+                                        outline: "none",
+                                    }}
+                                >
+                                    <option value="" disabled>
+                                        {transferLoadingTypes ? "加载中..." : "请选择账户"}
+                                    </option>
+                                    {transferWalletTypes.map((item) => (
+                                        <option key={item.walletType} value={item.walletType}>
+                                            {item.walletName || item.walletType}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div style={{ textAlign: "center" }}>
+                                <SwapOutlined style={{ color: "#22c55e", fontSize: 22 }} />
+                            </div>
+
+                            <div>
+                                <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>到</div>
+                                <div
+                                    style={{
+                                        width: "100%",
+                                        height: 42,
+                                        borderRadius: 12,
+                                        border: "1px solid #334155",
+                                        background: "#111827",
+                                        color: "#e5e7eb",
+                                        padding: "0 12px",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "space-between",
+                                        fontWeight: 600,
+                                    }}
+                                >
+                                    <span>{transferFixedWalletName}</span>
+                                    <span style={{ color: "#22c55e", fontSize: 12 }}>固定</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style={{ marginTop: 18, padding: 14, background: "#111827", borderRadius: 16, border: "1px solid #334155" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                                <div style={{ color: "#94a3b8", fontSize: 13 }}>币种</div>
+                                <div style={{ color: "#22c55e", fontWeight: 700 }}>USDT</div>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                                <div style={{ color: "#94a3b8", fontSize: 13 }}>可用资产</div>
+                                <div style={{ color: "#fff", fontWeight: 700 }}>
+                                    {transferLoadingBalance ? "加载中..." : `${transferBalance?.availableBalance ?? 0} USDT`}
+                                </div>
+                            </div>
+                            <div style={{ color: "#94a3b8", fontSize: 12 }}>
+                                账户余额：{transferBalance?.walletBalance ?? 0} · 冻结：{transferBalance?.freezeAmount ?? 0}
+                            </div>
+                        </div>
+
+                        <div style={{ marginTop: 18 }}>
+                            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>划转金额</div>
+                            <input
+                                value={transferAmount}
+                                onChange={(e) => setTransferAmount(e.target.value)}
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder="请输入划转金额"
+                                style={{
+                                    width: "100%",
+                                    height: 44,
+                                    borderRadius: 12,
+                                    border: "1px solid #334155",
+                                    background: "#111827",
+                                    color: "#fff",
+                                    padding: "0 12px",
+                                    outline: "none",
+                                }}
+                            />
+                        </div>
+
+                        {transferError ? (
+                            <div style={{ marginTop: 12, color: "#fca5a5", fontSize: 13 }}>
+                                {transferError}
+                            </div>
+                        ) : null}
+
+                        <div style={{ display: "flex", gap: 12, marginTop: 18 }}>
+                            <button
+                                onClick={closeTransferModal}
+                                style={{
+                                    flex: 1,
+                                    height: 44,
+                                    borderRadius: 999,
+                                    border: "1px solid #475569",
+                                    background: "#111827",
+                                    color: "#e5e7eb",
+                                    cursor: "pointer",
+                                    fontWeight: 600,
+                                }}
+                            >
+                                取消
+                            </button>
+                            <button
+                                onClick={handleTransferSubmit}
+                                disabled={transferSubmitting}
+                                style={{
+                                    flex: 1,
+                                    height: 44,
+                                    borderRadius: 999,
+                                    border: "none",
+                                    background: transferSubmitting ? "#64748b" : "#22c55e",
+                                    color: "#0f172a",
+                                    cursor: transferSubmitting ? "not-allowed" : "pointer",
+                                    fontWeight: 700,
+                                }}
+                            >
+                                {transferSubmitting ? "划转中..." : "确定划转"}
+                            </button>
+                        </div>
                     </div>
                 </div>
+            )}
 
                 {/* 下方：订单列表 + 结算汇总 */}
                 <div style={{ flexShrink: 0, marginTop: 12, display: "flex", flexDirection: "column", gap: 12 }}>

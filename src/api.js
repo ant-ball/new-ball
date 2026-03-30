@@ -127,6 +127,52 @@ export async function getUserBalance({ baseUrl = DEFAULT_BASE_URL } = {}) {
     return { url, data: json };
 }
 
+export async function queryTransferWalletTypes({ baseUrl = DEFAULT_BASE_URL } = {}) {
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/transfer/types`;
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`transfer/types 失败 HTTP ${response.status}`);
+    if (json && json.code != null && String(json.code) !== "0") {
+        throw new Error(json.msg || "transfer/types 失败");
+    }
+    return { url, data: json };
+}
+
+export async function queryTransferWalletBalance({ baseUrl = DEFAULT_BASE_URL, walletType } = {}) {
+    if (!walletType) throw new Error("walletType 不能为空");
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/transfer/balance?walletType=${encodeURIComponent(walletType)}`;
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`transfer/balance 失败 HTTP ${response.status}`);
+    if (json && json.code != null && String(json.code) !== "0") {
+        throw new Error(json.msg || "transfer/balance 失败");
+    }
+    return { url, data: json };
+}
+
+export async function submitTransfer({
+    baseUrl = DEFAULT_BASE_URL,
+    fromWalletType,
+    toWalletType,
+    coinType = "USDT",
+    amount,
+} = {}) {
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/transfer`;
+    const { response, json } = await requestJson(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            fromWalletType,
+            toWalletType,
+            coinType,
+            amount,
+        }),
+    });
+    if (!response.ok) throw new Error(`transfer 失败 HTTP ${response.status}`);
+    if (json && json.code != null && String(json.code) !== "0") {
+        throw new Error(json.msg || "transfer 失败");
+    }
+    return { url, data: json };
+}
+
 export async function getBet365All({
     baseUrl = DEFAULT_BASE_URL,
     day,
