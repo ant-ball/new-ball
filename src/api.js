@@ -127,6 +127,27 @@ export async function getUserBalance({ baseUrl = DEFAULT_BASE_URL } = {}) {
     return { url, data: json };
 }
 
+export async function getUserBalanceBills({
+    baseUrl = DEFAULT_BASE_URL,
+    id,
+    direction = "NEXT",
+    limit = 10,
+    coin,
+    symbol,
+    type,
+    startTime,
+    endTime,
+} = {}) {
+    const q = buildQuery({ id, direction, limit, coin, symbol, type, startTime, endTime });
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/balance/bills${q ? `?${q}` : ""}`;
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`balance/bills 失败 HTTP ${response.status}`);
+    if (json && json.code != null && String(json.code) !== "0") {
+        throw new Error(json.msg || "balance/bills 失败");
+    }
+    return { url, data: json };
+}
+
 export async function queryTransferWalletTypes({ baseUrl = DEFAULT_BASE_URL } = {}) {
     const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/transfer/types`;
     const { response, json } = await requestJson(url);

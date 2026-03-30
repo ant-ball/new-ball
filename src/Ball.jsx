@@ -8,6 +8,7 @@ import {
     getOrderList,
     getOrderFlow,
     getUserBalance,
+    getUserBalanceBills,
     queryTransferWalletTypes,
     queryTransferWalletBalance,
     submitTransfer,
@@ -546,6 +547,23 @@ function getMatchTime(match) {
     });
 }
 
+function formatBalanceBillTime(createdTime) {
+    if (createdTime == null || createdTime === "") return "-";
+    const raw = Number(createdTime);
+    if (!Number.isFinite(raw)) return String(createdTime);
+    const ts = raw < 1e12 ? raw * 1000 : raw;
+    return new Date(ts).toLocaleString("zh-CN", {
+        timeZone: "Asia/Singapore",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+    });
+}
+
 function findCurrentMatch(matchRaw, slipItem) {
     const matchList = getMatchListFromOddsResponse(matchRaw, slipItem?.type === "inplay" ? 1 : 0);
     const targetEventId = String(slipItem?.eventId ?? "");
@@ -883,6 +901,13 @@ export default function SoccerEarlyMarketPage() {
     const [transferBalance, setTransferBalance] = useState(null);
     const [transferAmount, setTransferAmount] = useState("");
     const [transferError, setTransferError] = useState("");
+    const [billVisible, setBillVisible] = useState(false);
+    const [billLoading, setBillLoading] = useState(false);
+    const [billLoadingMore, setBillLoadingMore] = useState(false);
+    const [billItems, setBillItems] = useState([]);
+    const [billHasNext, setBillHasNext] = useState(false);
+    const [billCursor, setBillCursor] = useState(null);
+    const [billError, setBillError] = useState("");
     const slipKeyRef = useRef(0);
 
     /** 玩法集合：type=1 早盘 type=5 滚球 type=6 其他；按 type -> smallId -> { betName, samllName, smallId } */
@@ -1477,6 +1502,56 @@ export default function SoccerEarlyMarketPage() {
         }
     }, [baseUrl]);
 
+    const loadBalanceBills = useCallback(async ({ reset = false } = {}) => {
+        try {
+            if (reset) {
+                setBillLoading(true);
+            } else {
+                setBillLoadingMore(true);
+            }
+            const params = {
+                limit: 10,
+                direction: "NEXT",
+            };
+            if (!reset && billCursor) {
+                params.id = billCursor;
+            }
+            const res = await getUserBalanceBills({ baseUrl, ...params });
+            const data = res?.data?.data ?? res?.data ?? {};
+            const items = Array.isArray(data?.items) ? data.items : [];
+            const nextCursor = items.length > 0 ? (items[items.length - 1]?.id ?? items[items.length - 1]?.ID ?? null) : null;
+            const hasNext = Boolean(data?.hasNext);
+            setBillError("");
+            setBillHasNext(hasNext);
+            setBillCursor(nextCursor);
+            setBillItems((prev) => {
+                if (reset) {
+                    return items;
+                }
+                const seen = new Set(prev.map((item) => String(item?.id ?? item?.ID ?? "")));
+                const merged = prev.slice();
+                items.forEach((item) => {
+                    const key = String(item?.id ?? item?.ID ?? "");
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        merged.push(item);
+                    }
+                });
+                return merged;
+            });
+        } catch (error) {
+            setBillError(error?.message || "加载流水失败");
+            if (reset) {
+                setBillItems([]);
+                setBillCursor(null);
+                setBillHasNext(false);
+            }
+        } finally {
+            setBillLoading(false);
+            setBillLoadingMore(false);
+        }
+    }, [baseUrl, billCursor]);
+
     const loadTransferTypes = useCallback(async () => {
         try {
             setTransferLoadingTypes(true);
@@ -1516,6 +1591,10 @@ export default function SoccerEarlyMarketPage() {
         setTransferVisible(true);
     }, []);
 
+    const openBillModal = useCallback(() => {
+        setBillVisible(true);
+    }, []);
+
     const closeTransferModal = useCallback(() => {
         setTransferVisible(false);
         setTransferLoadingTypes(false);
@@ -1529,6 +1608,16 @@ export default function SoccerEarlyMarketPage() {
         setTransferBalance(null);
         setTransferAmount("");
         setTransferError("");
+    }, []);
+
+    const closeBillModal = useCallback(() => {
+        setBillVisible(false);
+        setBillLoading(false);
+        setBillLoadingMore(false);
+        setBillItems([]);
+        setBillHasNext(false);
+        setBillCursor(null);
+        setBillError("");
     }, []);
 
     const switchTransferSides = useCallback(() => {
@@ -1590,6 +1679,12 @@ export default function SoccerEarlyMarketPage() {
         }
     }, [baseUrl, loadUserBalance, transferAmount, transferFixedWalletType, transferFromWalletType, transferSwapSides]);
 
+    const handleLoadMoreBills = useCallback(() => {
+        if (!billLoading && !billLoadingMore && billHasNext) {
+            loadBalanceBills({ reset: false });
+        }
+    }, [billHasNext, billLoading, billLoadingMore, loadBalanceBills]);
+
     useEffect(() => {
         if (baseUrl && authReady) {
             loadOrderList("unsettled");
@@ -1605,6 +1700,17 @@ export default function SoccerEarlyMarketPage() {
             setTransferWalletTypes([]);
         }
     }, [transferVisible, loadTransferTypes]);
+
+    useEffect(() => {
+        if (billVisible) {
+            loadBalanceBills({ reset: true });
+        } else {
+            setBillItems([]);
+            setBillHasNext(false);
+            setBillCursor(null);
+            setBillError("");
+        }
+    }, [billVisible, loadBalanceBills]);
 
     useEffect(() => {
         if (!transferVisible) return;
@@ -1735,22 +1841,42 @@ export default function SoccerEarlyMarketPage() {
                             <span>余额: <strong>{userBalance.amount ?? 0}</strong></span>
                             {userBalance.walletBalance != null && <span>钱包余额: <strong>{userBalance.walletBalance}</strong></span>}
                             {userBalance.freezeAmount != null && <span>冻结: <strong>{userBalance.freezeAmount}</strong></span>}
-                            <button
-                                onClick={openTransferModal}
-                                style={{
-                                    height: 30,
-                                    padding: "0 14px",
-                                    border: "1px solid #111827",
-                                    borderRadius: 999,
-                                    background: "#111827",
-                                    color: "#fff",
-                                    cursor: "pointer",
-                                    fontWeight: 600,
-                                    fontSize: 12,
-                                }}
-                            >
-                                划转
-                            </button>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "nowrap" }}>
+                                <button
+                                    onClick={openTransferModal}
+                                    style={{
+                                        height: 30,
+                                        padding: "0 14px",
+                                        border: "1px solid #111827",
+                                        borderRadius: 999,
+                                        background: "#111827",
+                                        color: "#fff",
+                                        cursor: "pointer",
+                                        fontWeight: 600,
+                                        fontSize: 12,
+                                        whiteSpace: "nowrap",
+                                    }}
+                                >
+                                    划转
+                                </button>
+                                <button
+                                    onClick={openBillModal}
+                                    style={{
+                                        height: 30,
+                                        padding: "0 14px",
+                                        border: "1px solid #2563eb",
+                                        borderRadius: 999,
+                                        background: "#fff",
+                                        color: "#2563eb",
+                                        cursor: "pointer",
+                                        fontWeight: 600,
+                                        fontSize: 12,
+                                        whiteSpace: "nowrap",
+                                    }}
+                                >
+                                    流水
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -2691,6 +2817,187 @@ export default function SoccerEarlyMarketPage() {
                             >
                                 {transferSubmitting ? "划转中..." : "确定划转"}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {billVisible && (
+                <div
+                    role="presentation"
+                    onClick={closeBillModal}
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        background: "rgba(15, 23, 42, 0.45)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        zIndex: 2100,
+                        padding: 16,
+                    }}
+                >
+                    <div
+                        role="presentation"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            width: "min(920px, 100%)",
+                            maxHeight: "85vh",
+                            overflow: "hidden",
+                            background: "#ffffff",
+                            color: "#111827",
+                            borderRadius: 18,
+                            padding: 18,
+                            boxShadow: "0 24px 80px rgba(15, 23, 42, 0.35)",
+                            border: "1px solid rgba(148, 163, 184, 0.18)",
+                            display: "flex",
+                            flexDirection: "column",
+                        }}
+                    >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                            <div>
+                                <div style={{ fontSize: 18, fontWeight: 700 }}>余额流水</div>
+                                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                                    默认查询足球账户流水，按最近记录向后翻页。
+                                </div>
+                            </div>
+                            <button
+                                onClick={closeBillModal}
+                                style={{
+                                    border: "none",
+                                    background: "transparent",
+                                    color: "#111827",
+                                    fontSize: 22,
+                                    cursor: "pointer",
+                                    lineHeight: 1,
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div style={{ marginBottom: 10, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                            <span style={{ fontSize: 12, color: "#6b7280" }}>
+                                币种：<strong style={{ color: "#111827" }}>USDT</strong>
+                            </span>
+                            <span style={{ fontSize: 12, color: "#6b7280" }}>
+                                账户类型：<strong style={{ color: "#111827" }}>OPTIONS</strong>
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => loadBalanceBills({ reset: true })}
+                                disabled={billLoading}
+                                style={{
+                                    padding: "6px 12px",
+                                    fontSize: 13,
+                                    border: "1px solid #d1d5db",
+                                    borderRadius: 8,
+                                    background: "#fff",
+                                    cursor: "pointer",
+                                }}
+                            >
+                                {billLoading ? "加载中..." : "刷新"}
+                            </button>
+                        </div>
+
+                        {billError ? (
+                            <div style={{ marginBottom: 10, color: "#dc2626", fontSize: 13 }}>{billError}</div>
+                        ) : null}
+
+                        <div style={{ flex: 1, overflow: "auto", border: "1px solid #e5e7eb", borderRadius: 12 }}>
+                            {billLoading && billItems.length === 0 ? (
+                                <div style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>加载中...</div>
+                            ) : billItems.length === 0 ? (
+                                <div style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>暂无流水</div>
+                            ) : (
+                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                                    <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
+                                        <tr>
+                                            {["时间", "类型", "方向", "币种", "交易对", "金额", "变动后", "余额类型"].map((title) => (
+                                                <th key={title} style={{ textAlign: "left", padding: "10px 12px", borderBottom: "1px solid #e5e7eb", color: "#475569", fontWeight: 700 }}>
+                                                    {title}
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {billItems.map((item) => {
+                                            const billKey = String(item?.id ?? item?.ID ?? `${item?.createdTime ?? ""}_${item?.symbol ?? ""}`);
+                                            return (
+                                                <tr key={billKey}>
+                                                    <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap" }}>
+                                                        {formatBalanceBillTime(item?.createdTime)}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9" }}>
+                                                        {item?.type ?? "-"}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9" }}>
+                                                        {item?.side ?? "-"}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9" }}>
+                                                        {item?.coin ?? "-"}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9" }}>
+                                                        {item?.symbol ?? "-"}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9", fontWeight: 600 }}>
+                                                        {item?.amount ?? "-"}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9" }}>
+                                                        {item?.afterAmount ?? "-"}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9" }}>
+                                                        {item?.balanceType ?? "-"}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, gap: 12, flexWrap: "wrap" }}>
+                            <div style={{ fontSize: 12, color: "#6b7280" }}>
+                                已加载 {billItems.length} 条
+                            </div>
+                            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                                <button
+                                    type="button"
+                                    onClick={handleLoadMoreBills}
+                                    disabled={!billHasNext || billLoading || billLoadingMore}
+                                    style={{
+                                        height: 34,
+                                        padding: "0 14px",
+                                        borderRadius: 999,
+                                        border: "1px solid #2563eb",
+                                        background: billHasNext ? "#2563eb" : "#e5e7eb",
+                                        color: billHasNext ? "#fff" : "#9ca3af",
+                                        cursor: billHasNext ? "pointer" : "not-allowed",
+                                        fontWeight: 600,
+                                        fontSize: 12,
+                                    }}
+                                >
+                                    {billLoadingMore ? "加载中..." : billHasNext ? "加载更多" : "没有更多了"}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={closeBillModal}
+                                    style={{
+                                        height: 34,
+                                        padding: "0 14px",
+                                        borderRadius: 999,
+                                        border: "1px solid #d1d5db",
+                                        background: "#fff",
+                                        color: "#374151",
+                                        cursor: "pointer",
+                                        fontWeight: 600,
+                                        fontSize: 12,
+                                    }}
+                                >
+                                    关闭
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
