@@ -385,6 +385,32 @@ function getAwayName(match) {
     );
 }
 
+function getDisplayHomeName(match) {
+    return (
+        match?.homeNameCN ||
+        match?.homeNameEN ||
+        match?.oHomeName ||
+        match?.homeTeamName ||
+        match?.homeName ||
+        match?.team1Name ||
+        match?.home ||
+        "主队"
+    );
+}
+
+function getDisplayAwayName(match) {
+    return (
+        match?.awayNameCN ||
+        match?.awayNameEN ||
+        match?.oAwayName ||
+        match?.awayTeamName ||
+        match?.awayName ||
+        match?.team2Name ||
+        match?.away ||
+        "客队"
+    );
+}
+
 function getInplaySelectionLabel(pa) {
     const selection = pa?.na ?? pa?.NA ?? pa?.nA ?? pa?.pNa ?? pa?.n2 ?? pa?.N2 ?? "";
     return selection != null ? String(selection).trim() : "";
@@ -608,7 +634,7 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
             }) || (slipItem.teamType ?? ""),
             at_time: atTime,
             timeStr: atTime != null ? String(atTime) : "",
-            selectionText: `${getHomeName(currentMatch)} vs ${getAwayName(currentMatch)} ${slipItem.label} ${currentItem?.name != null ? currentItem.name : currentItem?.handicap} @${currentItem?.odds}`,
+            selectionText: `${getDisplayHomeName(currentMatch)} vs ${getDisplayAwayName(currentMatch)} ${slipItem.label} ${currentItem?.name != null ? currentItem.name : currentItem?.handicap} @${currentItem?.odds}`,
         };
     }
 
@@ -639,7 +665,7 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
         }) || (slipItem.teamType ?? ""),
         at_time: atTime,
         timeStr: atTime != null ? String(atTime) : "",
-        selectionText: `${getHomeName(currentMatch)} vs ${getAwayName(currentMatch)} ${currentMavo?.na ?? currentMavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
+        selectionText: `${getDisplayHomeName(currentMatch)} vs ${getDisplayAwayName(currentMatch)} ${currentMavo?.na ?? currentMavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
     };
 }
 
@@ -1300,7 +1326,7 @@ export default function SoccerEarlyMarketPage() {
                         homeName: getHomeName(match),
                         awayName: getAwayName(match),
                     }),
-                    selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${label} ${item.name != null ? item.name : item.handicap} @${item.odds}`,
+                    selectionText: `${getDisplayHomeName(match)} vs ${getDisplayAwayName(match)} ${label} ${item.name != null ? item.name : item.handicap} @${item.odds}`,
                 };
                 const next = [...prev, nextItem];
                 if (hasDuplicateEventIdInSlip(next)) {
@@ -1358,7 +1384,7 @@ export default function SoccerEarlyMarketPage() {
                         awayName: getAwayName(match),
                         optionOrder: pa?.or ?? pa?.OR,
                     }),
-                    selectionText: `${getHomeName(match)} vs ${getAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
+                    selectionText: `${getDisplayHomeName(match)} vs ${getDisplayAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
                 };
                 const next = [...prev, nextItem];
                 if (hasDuplicateEventIdInSlip(next)) {
@@ -2196,7 +2222,7 @@ export default function SoccerEarlyMarketPage() {
                                             >
                                                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                                                     <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.35 }}>
-                                                        {getHomeName(match)} VS {getAwayName(match)}
+                                                        {getDisplayHomeName(match)} VS {getDisplayAwayName(match)}
                                                     </div>
                                                     {match?.timeStatus === "1" && (
                                                         <span
