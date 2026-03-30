@@ -2465,8 +2465,8 @@ export default function SoccerEarlyMarketPage() {
                                 </select>
                             </div>
 
-                            <div style={{ textAlign: "center" }}>
-                                <SwapOutlined style={{ color: "#22c55e", fontSize: 22 }} />
+                            <div style={{ textAlign: "center", color: "#22c55e", fontSize: 22, fontWeight: 700 }}>
+                                ⇄
                             </div>
 
                             <div>
