@@ -879,6 +879,7 @@ export default function SoccerEarlyMarketPage() {
     const [transferFixedWalletType, setTransferFixedWalletType] = useState("OPTIONS");
     const [transferFixedWalletName, setTransferFixedWalletName] = useState("足球账户");
     const [transferFromWalletType, setTransferFromWalletType] = useState("");
+    const [transferSwapSides, setTransferSwapSides] = useState(false);
     const [transferBalance, setTransferBalance] = useState(null);
     const [transferAmount, setTransferAmount] = useState("");
     const [transferError, setTransferError] = useState("");
@@ -1490,6 +1491,7 @@ export default function SoccerEarlyMarketPage() {
             setTransferFixedWalletType(fixedType);
             setTransferFixedWalletName(fixedName);
             setTransferFromWalletType(defaultLeft);
+            setTransferSwapSides(false);
             setTransferAmount("");
             setTransferError("");
             setTransferBalance(null);
@@ -1501,6 +1503,7 @@ export default function SoccerEarlyMarketPage() {
             setTransferFixedWalletType("OPTIONS");
             setTransferFixedWalletName("足球账户");
             setTransferFromWalletType("");
+            setTransferSwapSides(false);
             setTransferBalance(null);
         } finally {
             setTransferLoadingTypes(false);
@@ -1520,8 +1523,14 @@ export default function SoccerEarlyMarketPage() {
         setTransferFixedWalletType("OPTIONS");
         setTransferFixedWalletName("足球账户");
         setTransferFromWalletType("");
+        setTransferSwapSides(false);
         setTransferBalance(null);
         setTransferAmount("");
+        setTransferError("");
+    }, []);
+
+    const switchTransferSides = useCallback(() => {
+        setTransferSwapSides((prev) => !prev);
         setTransferError("");
     }, []);
 
@@ -1544,10 +1553,14 @@ export default function SoccerEarlyMarketPage() {
         setTransferError("");
         try {
             setTransferSubmitting(true);
+            const fixedWalletType = transferFixedWalletType;
+            const selectableWalletType = transferFromWalletType;
+            const fromWalletType = transferSwapSides ? fixedWalletType : selectableWalletType;
+            const toWalletType = transferSwapSides ? selectableWalletType : fixedWalletType;
             const res = await submitTransfer({
                 baseUrl,
-                fromWalletType: transferFromWalletType,
-                toWalletType: transferFixedWalletType,
+                fromWalletType,
+                toWalletType,
                 coinType: "USDT",
                 amount,
             });
@@ -1559,6 +1572,7 @@ export default function SoccerEarlyMarketPage() {
             setTransferAmount("");
             setTransferBalance(null);
             setTransferFromWalletType("");
+            setTransferSwapSides(false);
             setTransferWalletTypes([]);
             loadUserBalance();
         } catch (err) {
@@ -1566,7 +1580,7 @@ export default function SoccerEarlyMarketPage() {
         } finally {
             setTransferSubmitting(false);
         }
-    }, [baseUrl, loadUserBalance, transferAmount, transferFixedWalletType, transferFromWalletType]);
+    }, [baseUrl, loadUserBalance, transferAmount, transferFixedWalletType, transferFromWalletType, transferSwapSides]);
 
     useEffect(() => {
         if (baseUrl && authReady) {
@@ -2436,60 +2450,152 @@ export default function SoccerEarlyMarketPage() {
                             </button>
                         </div>
 
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 48px 1fr", gap: 14, alignItems: "center" }}>
-                            <div>
-                                <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>从</div>
-                                <select
-                                    value={transferFromWalletType}
-                                    onChange={(e) => handleTransferFromChange(e.target.value)}
-                                    disabled={transferLoadingTypes}
-                                    style={{
-                                        width: "100%",
-                                        height: 42,
-                                        borderRadius: 12,
-                                        border: "1px solid #334155",
-                                        background: "#111827",
-                                        color: "#e5e7eb",
-                                        padding: "0 12px",
-                                        outline: "none",
-                                    }}
-                                >
-                                    <option value="" disabled>
-                                        {transferLoadingTypes ? "加载中..." : "请选择账户"}
-                                    </option>
-                                    {transferWalletTypes.map((item) => (
-                                        <option key={item.walletType} value={item.walletType}>
-                                            {item.walletName || item.walletType}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 1fr", gap: 14, alignItems: "center" }}>
+                            {transferSwapSides ? (
+                                <>
+                                    <div>
+                                        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>从</div>
+                                        <div
+                                            style={{
+                                                width: "100%",
+                                                height: 42,
+                                                borderRadius: 12,
+                                                border: "1px solid #334155",
+                                                background: "#111827",
+                                                color: "#e5e7eb",
+                                                padding: "0 12px",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "space-between",
+                                                fontWeight: 600,
+                                            }}
+                                        >
+                                            <span>{transferFixedWalletName}</span>
+                                            <span style={{ color: "#22c55e", fontSize: 12 }}>固定</span>
+                                        </div>
+                                    </div>
 
-                            <div style={{ textAlign: "center", color: "#22c55e", fontSize: 22, fontWeight: 700 }}>
-                                ⇄
-                            </div>
+                                    <div style={{ textAlign: "center" }}>
+                                        <button
+                                            type="button"
+                                            onClick={switchTransferSides}
+                                            style={{
+                                                width: 36,
+                                                height: 36,
+                                                borderRadius: 999,
+                                                border: "1px solid #334155",
+                                                background: "#111827",
+                                                color: "#22c55e",
+                                                fontSize: 18,
+                                                fontWeight: 700,
+                                                cursor: "pointer",
+                                            }}
+                                        >
+                                            ⇄
+                                        </button>
+                                    </div>
 
-                            <div>
-                                <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>到</div>
-                                <div
-                                    style={{
-                                        width: "100%",
-                                        height: 42,
-                                        borderRadius: 12,
-                                        border: "1px solid #334155",
-                                        background: "#111827",
-                                        color: "#e5e7eb",
-                                        padding: "0 12px",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        justifyContent: "space-between",
-                                        fontWeight: 600,
-                                    }}
-                                >
-                                    <span>{transferFixedWalletName}</span>
-                                    <span style={{ color: "#22c55e", fontSize: 12 }}>固定</span>
-                                </div>
-                            </div>
+                                    <div>
+                                        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>到</div>
+                                        <select
+                                            value={transferFromWalletType}
+                                            onChange={(e) => handleTransferFromChange(e.target.value)}
+                                            disabled={transferLoadingTypes}
+                                            style={{
+                                                width: "100%",
+                                                height: 42,
+                                                borderRadius: 12,
+                                                border: "1px solid #334155",
+                                                background: "#111827",
+                                                color: "#e5e7eb",
+                                                padding: "0 12px",
+                                                outline: "none",
+                                            }}
+                                        >
+                                            <option value="" disabled>
+                                                {transferLoadingTypes ? "加载中..." : "请选择账户"}
+                                            </option>
+                                            {transferWalletTypes.map((item) => (
+                                                <option key={item.walletType} value={item.walletType}>
+                                                    {item.walletName || item.walletType}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <div>
+                                        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>从</div>
+                                        <select
+                                            value={transferFromWalletType}
+                                            onChange={(e) => handleTransferFromChange(e.target.value)}
+                                            disabled={transferLoadingTypes}
+                                            style={{
+                                                width: "100%",
+                                                height: 42,
+                                                borderRadius: 12,
+                                                border: "1px solid #334155",
+                                                background: "#111827",
+                                                color: "#e5e7eb",
+                                                padding: "0 12px",
+                                                outline: "none",
+                                            }}
+                                        >
+                                            <option value="" disabled>
+                                                {transferLoadingTypes ? "加载中..." : "请选择账户"}
+                                            </option>
+                                            {transferWalletTypes.map((item) => (
+                                                <option key={item.walletType} value={item.walletType}>
+                                                    {item.walletName || item.walletType}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div style={{ textAlign: "center" }}>
+                                        <button
+                                            type="button"
+                                            onClick={switchTransferSides}
+                                            style={{
+                                                width: 36,
+                                                height: 36,
+                                                borderRadius: 999,
+                                                border: "1px solid #334155",
+                                                background: "#111827",
+                                                color: "#22c55e",
+                                                fontSize: 18,
+                                                fontWeight: 700,
+                                                cursor: "pointer",
+                                            }}
+                                        >
+                                            ⇄
+                                        </button>
+                                    </div>
+
+                                    <div>
+                                        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>到</div>
+                                        <div
+                                            style={{
+                                                width: "100%",
+                                                height: 42,
+                                                borderRadius: 12,
+                                                border: "1px solid #334155",
+                                                background: "#111827",
+                                                color: "#e5e7eb",
+                                                padding: "0 12px",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "space-between",
+                                                fontWeight: 600,
+                                            }}
+                                        >
+                                            <span>{transferFixedWalletName}</span>
+                                            <span style={{ color: "#22c55e", fontSize: 12 }}>固定</span>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
                         </div>
 
                         <div style={{ marginTop: 18, padding: 14, background: "#111827", borderRadius: 16, border: "1px solid #334155" }}>
