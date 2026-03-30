@@ -1561,6 +1561,10 @@ export default function SoccerEarlyMarketPage() {
             const selectableWalletType = transferFromWalletType;
             const fromWalletType = transferSwapSides ? fixedWalletType : selectableWalletType;
             const toWalletType = transferSwapSides ? selectableWalletType : fixedWalletType;
+            if (fromWalletType !== "OPTIONS" && toWalletType !== "OPTIONS") {
+                setTransferError("来源或目标必须包含足球账户");
+                return;
+            }
             const res = await submitTransfer({
                 baseUrl,
                 fromWalletType,
