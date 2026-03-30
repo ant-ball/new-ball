@@ -1510,6 +1510,8 @@ export default function SoccerEarlyMarketPage() {
         }
     }, [baseUrl, loadTransferBalance]);
 
+    const currentLeftWalletType = transferSwapSides ? transferFixedWalletType : transferFromWalletType;
+
     const openTransferModal = useCallback(() => {
         setTransferVisible(true);
     }, []);
@@ -1537,8 +1539,10 @@ export default function SoccerEarlyMarketPage() {
     const handleTransferFromChange = useCallback((walletType) => {
         setTransferFromWalletType(walletType);
         setTransferError("");
-        loadTransferBalance(walletType);
-    }, [loadTransferBalance]);
+        if (!transferSwapSides) {
+            loadTransferBalance(walletType);
+        }
+    }, [loadTransferBalance, transferSwapSides]);
 
     const handleTransferSubmit = useCallback(async () => {
         const amount = Number(transferAmount);
@@ -1597,6 +1601,15 @@ export default function SoccerEarlyMarketPage() {
             setTransferWalletTypes([]);
         }
     }, [transferVisible, loadTransferTypes]);
+
+    useEffect(() => {
+        if (!transferVisible) return;
+        if (!currentLeftWalletType) {
+            setTransferBalance(null);
+            return;
+        }
+        loadTransferBalance(currentLeftWalletType);
+    }, [currentLeftWalletType, transferVisible, loadTransferBalance]);
 
     const handleOrderListTabChange = (tab) => {
         setOrderListTab(tab);
