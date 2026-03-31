@@ -12,6 +12,7 @@ import {
     queryTransferWalletTypes,
     queryTransferWalletBalance,
     submitTransfer,
+    getMatchResult,
 } from "./api";
 import { useOddsSocket } from "./useOddsSocket";
 
@@ -590,6 +591,84 @@ function formatBalanceBillTime(createdTime) {
     });
 }
 
+function safeParseJson(value) {
+    if (value == null || value === "") return null;
+    if (typeof value !== "string") return value;
+    try {
+        return JSON.parse(value);
+    } catch {
+        return value;
+    }
+}
+
+function formatResultTimeScoreType(type) {
+    const value = Number(type);
+    if (!Number.isFinite(value)) return type == null ? "-" : String(type);
+    const map = {
+        1: "半场",
+        2: "全场",
+        3: "加时",
+        4: "点球",
+    };
+    return map[value] || `类型${value}`;
+}
+
+function formatTimelineTime(raw) {
+    if (raw == null || raw === "") return "-";
+    const num = Number(raw);
+    if (Number.isFinite(num)) return formatBalanceBillTime(num);
+    return String(raw);
+}
+
+function parseMatchEventSortValue(timeText) {
+    if (timeText == null || timeText === "") return Number.POSITIVE_INFINITY;
+    const str = String(timeText).trim();
+    if (!str) return Number.POSITIVE_INFINITY;
+    const plusMatch = str.match(/^(\d+)\s*\+\s*(\d+)$/);
+    if (plusMatch) return Number(plusMatch[1]) + Number(plusMatch[2]) / 100;
+    const minMatch = str.match(/(\d+(?:\.\d+)?)/);
+    if (minMatch) return Number(minMatch[1]);
+    const lower = str.toLowerCase();
+    if (lower.includes("ht") || lower.includes("half")) return 46;
+    if (lower.includes("ft") || lower.includes("full")) return 90;
+    return Number.POSITIVE_INFINITY;
+}
+
+function classifyResultEvent(eventText) {
+    const text = String(eventText ?? "").trim();
+    const lower = text.toLowerCase();
+    if (!text) return { label: "事件", tone: "gray" };
+    if (/(黄牌)/.test(text) || lower.includes("yellow")) return { label: "黄牌", tone: "amber" };
+    if (/(红牌)/.test(text) || lower.includes("red")) return { label: "红牌", tone: "red" };
+    if (/(角球)/.test(text) || lower.includes("corner")) return { label: "角球", tone: "blue" };
+    if (/(进球|乌龙)/.test(text) || lower.includes("goal")) return { label: "进球", tone: "emerald" };
+    if (/(点球)/.test(text) || lower.includes("penalt")) return { label: "点球", tone: "purple" };
+    if (/(换人)/.test(text) || lower.includes("substit")) return { label: "换人", tone: "slate" };
+    return { label: "事件", tone: "gray" };
+}
+
+function getToneStyles(tone) {
+    const tones = {
+        emerald: { bg: "#ecfdf5", border: "#a7f3d0", text: "#047857" },
+        blue: { bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8" },
+        amber: { bg: "#fffbeb", border: "#fde68a", text: "#b45309" },
+        red: { bg: "#fef2f2", border: "#fecaca", text: "#b91c1c" },
+        purple: { bg: "#f5f3ff", border: "#ddd6fe", text: "#7c3aed" },
+        slate: { bg: "#f8fafc", border: "#e2e8f0", text: "#475569" },
+        gray: { bg: "#f9fafb", border: "#e5e7eb", text: "#374151" },
+    };
+    return tones[tone] || tones.gray;
+}
+
+function getOrderResultBet365Id(order) {
+    const direct = order?.bet365Id ?? order?.eventId ?? order?.bet365_id;
+    if (direct != null && String(direct).trim() !== "") return String(direct);
+    const firstContact = Array.isArray(order?.contactVO) && order.contactVO.length > 0 ? order.contactVO[0] : null;
+    const contactEventId = firstContact?.event?.bet365Id ?? firstContact?.event?.id ?? firstContact?.bet365Id ?? firstContact?.eventId;
+    if (contactEventId != null && String(contactEventId).trim() !== "") return String(contactEventId);
+    return "";
+}
+
 function findCurrentMatch(matchRaw, slipItem) {
     const matchList = getMatchListFromOddsResponse(matchRaw, slipItem?.type === "inplay" ? 1 : 0);
     const targetEventId = String(slipItem?.eventId ?? "");
@@ -914,6 +993,11 @@ export default function SoccerEarlyMarketPage() {
     /** 订单列表 Tab：'unsettled' 未结算，'other' 其他（结算失败+已结算） */
     const [orderListTab, setOrderListTab] = useState("unsettled");
     const [orderFlow, setOrderFlow] = useState(null);
+    const [orderResultVisible, setOrderResultVisible] = useState(false);
+    const [orderResultLoading, setOrderResultLoading] = useState(false);
+    const [orderResultError, setOrderResultError] = useState("");
+    const [orderResultOrder, setOrderResultOrder] = useState(null);
+    const [orderResultData, setOrderResultData] = useState(null);
     const [userBalance, setUserBalance] = useState(null);
     const [transferVisible, setTransferVisible] = useState(false);
     const [transferLoadingTypes, setTransferLoadingTypes] = useState(false);
@@ -1645,6 +1729,39 @@ export default function SoccerEarlyMarketPage() {
         setBillCursor(null);
         setBillError("");
     }, []);
+
+    const closeOrderResultModal = useCallback(() => {
+        setOrderResultVisible(false);
+        setOrderResultLoading(false);
+        setOrderResultError("");
+        setOrderResultOrder(null);
+        setOrderResultData(null);
+    }, []);
+
+    const openOrderResultModal = useCallback(async (order) => {
+        const bet365Id = getOrderResultBet365Id(order);
+        if (!bet365Id) {
+            setOrderResultError("该订单没有可查询的 bet365Id");
+            setOrderResultOrder(order ?? null);
+            setOrderResultData(null);
+            setOrderResultVisible(true);
+            return;
+        }
+        setOrderResultVisible(true);
+        setOrderResultOrder(order ?? null);
+        setOrderResultError("");
+        setOrderResultLoading(true);
+        try {
+            const res = await getMatchResult({ baseUrl, eventId: bet365Id });
+            const payload = res?.data?.data ?? res?.data ?? null;
+            setOrderResultData(payload);
+        } catch (err) {
+            setOrderResultError(err?.message || "获取赛果失败");
+            setOrderResultData(null);
+        } finally {
+            setOrderResultLoading(false);
+        }
+    }, [baseUrl]);
 
     const switchTransferSides = useCallback(() => {
         setTransferSwapSides((prev) => !prev);
@@ -3029,6 +3146,408 @@ export default function SoccerEarlyMarketPage() {
                 </div>
             )}
 
+            {orderResultVisible && (
+                <div
+                    role="presentation"
+                    onClick={closeOrderResultModal}
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        background: "rgba(15, 23, 42, 0.52)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        zIndex: 2200,
+                        padding: 16,
+                    }}
+                >
+                    <div
+                        role="presentation"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            width: "min(980px, 100%)",
+                            maxHeight: "88vh",
+                            overflow: "hidden",
+                            background: "#ffffff",
+                            color: "#111827",
+                            borderRadius: 18,
+                            padding: 18,
+                            boxShadow: "0 24px 80px rgba(15, 23, 42, 0.35)",
+                            border: "1px solid rgba(148, 163, 184, 0.18)",
+                            display: "flex",
+                            flexDirection: "column",
+                        }}
+                    >
+                        {(() => {
+                            const result = orderResultData || {};
+                            const bet365Id = getOrderResultBet365Id(orderResultOrder) || result?.bet365Id || "-";
+                            const leagueName = result?.leagueName || orderResultOrder?.leagueName || "-";
+                            const homeName = result?.homeName || result?.bet365ResultEventsModel?.homeName || orderResultOrder?.homeName || "";
+                            const awayName = result?.awayName || result?.bet365ResultEventsModel?.awayName || orderResultOrder?.awayName || "";
+                            const timeText = result?.time || orderResultOrder?.time || "-";
+                            const createdText = result?.createTime ? formatBalanceBillTime(result.createTime) : "-";
+                            const orderStartText = formatTimelineTime(orderResultOrder?.createdTime ?? orderResultOrder?.createTime ?? orderResultData?.createTime);
+                            const resetInfo = safeParseJson(result?.resetInfo);
+                            const resetList = Array.isArray(resetInfo) ? resetInfo : (resetInfo ? [resetInfo] : []);
+                            const eventModels = Array.isArray(result?.bet365ResultEventsModel?.models)
+                                ? result.bet365ResultEventsModel.models.slice().sort((a, b) => parseMatchEventSortValue(a?.time) - parseMatchEventSortValue(b?.time))
+                                : [];
+                            const scoreModels = Array.isArray(result?.bet365ResultEventsModel?.scoreModels) ? result.bet365ResultEventsModel.scoreModels : [];
+                            const statsModels = Array.isArray(result?.resultStatsModel?.modelList) ? result.resultStatsModel.modelList : [];
+                            const singleOrderRows = (() => {
+                                if (!orderResultOrder) return [];
+                                if (Array.isArray(orderResultOrder.contactVO) && orderResultOrder.contactVO.length > 0) {
+                                    return orderResultOrder.contactVO.map((c) => ({
+                                        home: c?.event?.homeNameCN || c?.event?.homeNameEN || c?.event?.oHomeName || "-",
+                                        away: c?.event?.awayNameCN || c?.event?.awayNameEN || c?.event?.oAwayName || "-",
+                                        betPlayName: c?.betPlayName || "",
+                                        teamType: c?.teamType || "",
+                                        odds: c?.odds,
+                                        whenTheScore: c?.whenTheScore || "",
+                                        settlementScore: c?.settlementScore || "",
+                                    }));
+                                }
+                                return [{
+                                    home: orderResultOrder?.homeNameCN || orderResultOrder?.homeNameEN || orderResultOrder?.homeName || "-",
+                                    away: orderResultOrder?.awayNameCN || orderResultOrder?.awayNameEN || orderResultOrder?.awayName || "-",
+                                    betPlayName: orderResultOrder?.betPlayName || "",
+                                    teamType: orderResultOrder?.teamType || "",
+                                    odds: orderResultOrder?.odds,
+                                    whenTheScore: orderResultOrder?.whenTheScore || "",
+                                    settlementScore: orderResultOrder?.settlementScore || "",
+                                }];
+                            })();
+                            const orderOddsRows = singleOrderRows.map((row, idx) => ({
+                                key: `odds-${idx}`,
+                                title: idx === 0 ? "下注赔率" : "注单赔率",
+                                time: orderStartText,
+                                detail: `${row.home} VS ${row.away} · ${(row.betPlayName || "").replace(/_/g, " ")}${row.teamType ? ` ${row.teamType}` : ""}${row.odds != null ? ` @${row.odds}` : ""}${row.whenTheScore ? ` · 当时比分 ${row.whenTheScore}` : ""}`,
+                            }));
+                            return (
+                                <>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                                        <div>
+                                            <div style={{ fontSize: 18, fontWeight: 700 }}>比赛结果</div>
+                                            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                                                bet365Id: {bet365Id} · {leagueName}
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={closeOrderResultModal}
+                                            style={{
+                                                border: "none",
+                                                background: "transparent",
+                                                color: "#111827",
+                                                fontSize: 22,
+                                                cursor: "pointer",
+                                                lineHeight: 1,
+                                            }}
+                                        >
+                                            ×
+                                        </button>
+                                    </div>
+
+                                    <div style={{ flex: 1, overflow: "auto", paddingRight: 4 }}>
+                                        {orderResultLoading ? (
+                                            <div style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>加载赛果中...</div>
+                                        ) : orderResultError ? (
+                                            <div style={{ padding: 16, border: "1px solid #fecaca", borderRadius: 12, color: "#b91c1c", background: "#fef2f2" }}>
+                                                {orderResultError}
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginBottom: 12 }}>
+                                                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                                                        <div style={{ fontSize: 11, color: "#6b7280" }}>主客队</div>
+                                                        <div style={{ marginTop: 6, fontWeight: 700 }}>{homeName} VS {awayName}</div>
+                                                    </div>
+                                                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                                                        <div style={{ fontSize: 11, color: "#6b7280" }}>开赛时间</div>
+                                                        <div style={{ marginTop: 6, fontWeight: 700 }}>{timeText}</div>
+                                                    </div>
+                                                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                                                        <div style={{ fontSize: 11, color: "#6b7280" }}>赛果生成时间</div>
+                                                        <div style={{ marginTop: 6, fontWeight: 700 }}>{createdText}</div>
+                                                    </div>
+                                                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                                                        <div style={{ fontSize: 11, color: "#6b7280" }}>结算状态</div>
+                                                        <div style={{ marginTop: 6, fontWeight: 700, color: orderResultOrder?.settlementStatus === "HAS_BEEN_SETTLED" ? "#059669" : orderResultOrder?.settlementStatus === "SETTLEMENT_FAIL" ? "#dc2626" : "#111827" }}>
+                                                            {orderResultOrder?.settlementStatus === "HAS_BEEN_SETTLED" ? "已结算" : orderResultOrder?.settlementStatus === "SETTLEMENT_FAIL" ? "结算失败" : (orderResultOrder?.settlementStatus || "-")}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 12, marginBottom: 12 }}>
+                                                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+                                                        <div style={{ fontWeight: 700, marginBottom: 8 }}>本单投注</div>
+                                                        <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#374151" }}>
+                                                            {singleOrderRows.map((row, idx) => (
+                                                                <div key={idx} style={{ padding: "8px 10px", borderRadius: 8, background: "#f9fafb", border: "1px solid #e5e7eb" }}>
+                                                                    <div style={{ fontWeight: 600 }}>
+                                                                        {row.home} VS {row.away}
+                                                                    </div>
+                                                                    <div style={{ marginTop: 4 }}>
+                                                                        {(row.betPlayName || "").replace(/_/g, " ")}{row.teamType ? ` ${row.teamType}` : ""}{row.odds != null ? ` @${row.odds}` : ""}
+                                                                    </div>
+                                                                    {(row.whenTheScore || row.settlementScore) && (
+                                                                        <div style={{ marginTop: 4, color: "#dc2626" }}>
+                                                                            {row.whenTheScore ? `当时比分: ${row.whenTheScore}` : ""}{row.whenTheScore && row.settlementScore ? " · " : ""}{row.settlementScore ? `结算比分: ${row.settlementScore}` : ""}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+
+                                                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+                                                        <div style={{ fontWeight: 700, marginBottom: 8 }}>结算原因 / 比分回退</div>
+                                                        {resetList.length > 0 ? (
+                                                            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                                                {resetList.map((item, idx) => {
+                                                                    const startTime = item?.startTime != null ? formatBalanceBillTime(item.startTime) : "";
+                                                                    const endTime = item?.endTime != null ? formatBalanceBillTime(item.endTime) : "";
+                                                                    const reason = item?.reason || item?.msg || item?.text || JSON.stringify(item);
+                                                                    return (
+                                                                        <div key={idx} style={{ padding: "8px 10px", borderRadius: 8, background: "#fff7ed", border: "1px solid #fed7aa", fontSize: 12, color: "#9a3412" }}>
+                                                                            <div style={{ fontWeight: 700 }}>{reason}</div>
+                                                                            {(startTime || endTime) && (
+                                                                                <div style={{ marginTop: 4, color: "#b45309" }}>
+                                                                                    {startTime || "-"} 至 {endTime || "-"}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        ) : (
+                                                            <div style={{ color: "#6b7280", fontSize: 12 }}>暂无比分回退记录</div>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, marginBottom: 12, background: "#fcfcfd" }}>
+                                                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 10 }}>
+                                                        <div>
+                                                            <div style={{ fontWeight: 700 }}>比赛时间轴 / 赔率节点</div>
+                                                            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                                                                这里优先展示后台能稳定回溯的节点：下注开始、进球 / 黄牌 / 红牌 / 角球、比分走势、断开 / 回退记录。
+                                                            </div>
+                                                        </div>
+                                                        <div style={{ fontSize: 12, color: "#9ca3af", textAlign: "right" }}>
+                                                            赔率曲线目前先展示下注节点与当前可回溯节点，完整历史需要后台再补
+                                                        </div>
+                                                    </div>
+
+                                                    <div style={{ display: "grid", gridTemplateColumns: "1.05fr 0.95fr", gap: 12 }}>
+                                                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                                                            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fff" }}>
+                                                                <div style={{ fontWeight: 700, marginBottom: 8 }}>下注起点</div>
+                                                                {orderOddsRows.length > 0 ? (
+                                                                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                                                        {orderOddsRows.map((row) => (
+                                                                            <div key={row.key} style={{ padding: "8px 10px", borderRadius: 8, background: "#f8fafc", border: "1px solid #e5e7eb" }}>
+                                                                                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                                                                                    <div style={{ fontWeight: 700 }}>{row.title}</div>
+                                                                                    <div style={{ fontSize: 12, color: "#6b7280" }}>{row.time}</div>
+                                                                                </div>
+                                                                                <div style={{ marginTop: 4, fontSize: 12, color: "#374151" }}>{row.detail}</div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div style={{ color: "#6b7280", fontSize: 12 }}>暂无下注节点</div>
+                                                                )}
+                                                            </div>
+
+                                                            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fff" }}>
+                                                                <div style={{ fontWeight: 700, marginBottom: 8 }}>比赛事件（进球 / 黄牌 / 红牌 / 角球）</div>
+                                                                {eventModels.length > 0 ? (
+                                                                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                                                        {eventModels.map((item, idx) => {
+                                                                            const tag = classifyResultEvent(item?.event);
+                                                                            const tone = getToneStyles(tag.tone);
+                                                                            return (
+                                                                                <div key={`${item?.id || idx}`} style={{ padding: "8px 10px", borderRadius: 10, background: "#fff", border: "1px solid #e5e7eb" }}>
+                                                                                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                                                                                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                                                                            <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 11, background: tone.bg, color: tone.text, border: `1px solid ${tone.border}` }}>
+                                                                                                {tag.label}
+                                                                                            </span>
+                                                                                            <span style={{ fontWeight: 700 }}>{item?.teamName || "-"}</span>
+                                                                                        </div>
+                                                                                        <span style={{ fontSize: 12, color: "#6b7280" }}>{item?.time || "-"}</span>
+                                                                                    </div>
+                                                                                    <div style={{ marginTop: 4, fontSize: 12, color: "#374151" }}>{item?.event || "-"}</div>
+                                                                                    {item?.num != null && <div style={{ marginTop: 4, color: "#dc2626", fontSize: 12 }}>编号: {item.num}</div>}
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div style={{ color: "#6b7280", fontSize: 12 }}>暂无赛果事件</div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                                                            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fff" }}>
+                                                                <div style={{ fontWeight: 700, marginBottom: 8 }}>比分走势</div>
+                                                                {scoreModels.length > 0 ? (
+                                                                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                                                        {scoreModels.map((item, idx) => {
+                                                                            const tone = item?.timeScoreType === 1 ? getToneStyles("blue") : item?.timeScoreType === 2 ? getToneStyles("emerald") : item?.timeScoreType === 3 ? getToneStyles("purple") : getToneStyles("gray");
+                                                                            return (
+                                                                                <div key={idx} style={{ padding: "8px 10px", borderRadius: 10, background: "#fff", border: "1px solid #e5e7eb" }}>
+                                                                                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                                                                                        <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 11, background: tone.bg, color: tone.text, border: `1px solid ${tone.border}` }}>
+                                                                                            {formatResultTimeScoreType(item?.timeScoreType)}
+                                                                                        </span>
+                                                                                        <span style={{ fontWeight: 700, fontSize: 13 }}>
+                                                                                            {item?.homeScore != null || item?.awayScore != null ? `${item?.homeScore ?? "-"} : ${item?.awayScore ?? "-"}` : "-"}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div style={{ color: "#6b7280", fontSize: 12 }}>暂无比分走势</div>
+                                                                )}
+                                                            </div>
+
+                                                            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fff" }}>
+                                                                <div style={{ fontWeight: 700, marginBottom: 8 }}>断开 / 回退 / 裁判取消</div>
+                                                                {resetList.length > 0 ? (
+                                                                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                                                        {resetList.map((item, idx) => {
+                                                                            const startTime = item?.startTime != null ? formatBalanceBillTime(item.startTime) : "";
+                                                                            const endTime = item?.endTime != null ? formatBalanceBillTime(item.endTime) : "";
+                                                                            const reason = item?.reason || item?.msg || item?.text || JSON.stringify(item);
+                                                                            return (
+                                                                                <div key={idx} style={{ padding: "8px 10px", borderRadius: 10, background: "#fff7ed", border: "1px solid #fed7aa" }}>
+                                                                                    <div style={{ fontWeight: 700, color: "#9a3412" }}>{reason}</div>
+                                                                                    {(startTime || endTime) && (
+                                                                                        <div style={{ marginTop: 4, color: "#b45309", fontSize: 12 }}>
+                                                                                            {startTime || "-"} 至 {endTime || "-"}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div style={{ color: "#6b7280", fontSize: 12 }}>暂无比分回退记录</div>
+                                                                )}
+                                                            </div>
+
+                                                            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fff" }}>
+                                                                <div style={{ fontWeight: 700, marginBottom: 8 }}>赔率节点</div>
+                                                                {orderOddsRows.length > 0 ? (
+                                                                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                                                        {orderOddsRows.map((row) => (
+                                                                            <div key={`curve-${row.key}`} style={{ padding: "8px 10px", borderRadius: 10, background: "#f9fafb", border: "1px solid #e5e7eb" }}>
+                                                                                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                                                                                    <div style={{ fontWeight: 700 }}>{row.title}</div>
+                                                                                    <div style={{ fontSize: 12, color: "#6b7280" }}>{row.time}</div>
+                                                                                </div>
+                                                                                <div style={{ marginTop: 4, fontSize: 12, color: "#374151" }}>{row.detail}</div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div style={{ color: "#6b7280", fontSize: 12 }}>暂无赔率节点</div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginBottom: 12 }}>
+                                                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+                                                        <div style={{ fontWeight: 700, marginBottom: 8 }}>赛果事件</div>
+                                                        {eventModels.length > 0 ? (
+                                                            <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+                                                                {eventModels.map((item, idx) => (
+                                                                    <div key={idx} style={{ padding: "6px 8px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                                                                        <div style={{ color: "#6b7280" }}>
+                                                                            {item?.time || "-"} {item?.teamName || ""}
+                                                                        </div>
+                                                                        <div style={{ fontWeight: 600 }}>{item?.event || "-"}</div>
+                                                                        {item?.num != null && <div style={{ color: "#dc2626" }}>编号: {item.num}</div>}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <div style={{ color: "#6b7280", fontSize: 12 }}>暂无赛果事件</div>
+                                                        )}
+                                                    </div>
+
+                                                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+                                                        <div style={{ fontWeight: 700, marginBottom: 8 }}>比分走势</div>
+                                                        {scoreModels.length > 0 ? (
+                                                            <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+                                                                {scoreModels.map((item, idx) => (
+                                                                    <div key={idx} style={{ padding: "6px 8px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                                                                        <div style={{ fontWeight: 600 }}>
+                                                                            {item?.homeScore != null || item?.awayScore != null ? `${item?.homeScore ?? "-"} : ${item?.awayScore ?? "-"}` : "-"}
+                                                                        </div>
+                                                                        <div style={{ color: "#6b7280" }}>{formatResultTimeScoreType(item?.timeScoreType)}</div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <div style={{ color: "#6b7280", fontSize: 12 }}>暂无比分走势</div>
+                                                        )}
+                                                    </div>
+
+                                                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+                                                        <div style={{ fontWeight: 700, marginBottom: 8 }}>赔率趋势 / 统计</div>
+                                                        {statsModels.length > 0 ? (
+                                                            <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+                                                                {statsModels.map((item, idx) => (
+                                                                    <div key={idx} style={{ padding: "6px 8px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                                                                        <div style={{ fontWeight: 600 }}>{item?.stats || "-"}</div>
+                                                                        <div style={{ color: "#6b7280" }}>
+                                                                            {item?.homeStr ?? item?.homeNum ?? "-"} / {item?.awayStr ?? item?.awayNum ?? "-"}
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <div style={{ color: "#6b7280", fontSize: 12 }}>暂无统计趋势</div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+
+                                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                                        <button
+                                            type="button"
+                                            onClick={closeOrderResultModal}
+                                            style={{
+                                                height: 36,
+                                                padding: "0 16px",
+                                                borderRadius: 999,
+                                                border: "1px solid #d1d5db",
+                                                background: "#fff",
+                                                color: "#374151",
+                                                cursor: "pointer",
+                                                fontWeight: 600,
+                                                fontSize: 12,
+                                            }}
+                                        >
+                                            关闭
+                                        </button>
+                                    </div>
+                                </>
+                            );
+                        })()}
+                    </div>
+                </div>
+            )}
+
                 {/* 下方：订单列表 + 结算汇总 */}
                 <div style={{ flexShrink: 0, marginTop: 12, display: "flex", flexDirection: "column", gap: 12 }}>
                     <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
@@ -3097,13 +3616,30 @@ export default function SoccerEarlyMarketPage() {
                                     >
                                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                                             <span>订单号: {order.orderId || order.contact || "-"}</span>
-                                            <span>
-                                                金额: {order.betAmount} · 结算: {order.settlementAmount != null ? order.settlementAmount : "-"}
-                                                {order.settlementStatus != null && (
-                                                    <span style={{ marginLeft: 8, color: order.settlementStatus === "HAS_BEEN_SETTLED" ? "#059669" : order.settlementStatus === "SETTLEMENT_FAIL" ? "#dc2626" : "#6b7280", fontSize: 11 }}>
-                                                        {order.settlementStatus === "HAS_BEEN_SETTLED" ? "已结算" : order.settlementStatus === "SETTLEMENT_FAIL" ? "结算失败" : order.settlementStatus}
-                                                    </span>
-                                                )}
+                                            <span style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                                <span>
+                                                    金额: {order.betAmount} · 结算: {order.settlementAmount != null ? order.settlementAmount : "-"}
+                                                    {order.settlementStatus != null && (
+                                                        <span style={{ marginLeft: 8, color: order.settlementStatus === "HAS_BEEN_SETTLED" ? "#059669" : order.settlementStatus === "SETTLEMENT_FAIL" ? "#dc2626" : "#6b7280", fontSize: 11 }}>
+                                                            {order.settlementStatus === "HAS_BEEN_SETTLED" ? "已结算" : order.settlementStatus === "SETTLEMENT_FAIL" ? "结算失败" : order.settlementStatus}
+                                                        </span>
+                                                    )}
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openOrderResultModal(order)}
+                                                    style={{
+                                                        padding: "4px 10px",
+                                                        fontSize: 12,
+                                                        border: "1px solid #d1d5db",
+                                                        borderRadius: 999,
+                                                        background: "#fff",
+                                                        cursor: "pointer",
+                                                        color: "#111827",
+                                                    }}
+                                                >
+                                                    比赛结果
+                                                </button>
                                             </span>
                                         </div>
                                         {order.contactVO && order.contactVO.length > 0 ? (
