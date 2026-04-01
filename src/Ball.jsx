@@ -803,6 +803,56 @@ const MAIN_MARKET_KEYS = [
     { key: "42_half_time_full_time", label: "半&全场" },
 ];
 
+const PREMATCH_SECTION_ORDER = ["main", "half_props", "quarter_props", "team_props", "others"];
+
+function getPrematchSectionLabel(sectionKey) {
+    const map = {
+        main: "主盘",
+        half_props: "半场盘",
+        quarter_props: "节次盘",
+        team_props: "球队盘",
+        others: "其他盘",
+    };
+    return map[sectionKey] || sectionKey || "其他盘";
+}
+
+function getPrematchMarketGroups(match) {
+    const oddsMap = match?.odds ?? {};
+    const groups = new Map();
+    Object.entries(oddsMap).forEach(([marketKey, oddsObj]) => {
+        if (!oddsObj || !Array.isArray(oddsObj.odds) || oddsObj.odds.length === 0) return;
+        const sectionKey = oddsObj.bigTypeName || "others";
+        if (!groups.has(sectionKey)) {
+            groups.set(sectionKey, []);
+        }
+        groups.get(sectionKey).push({
+            marketKey,
+            label: oddsObj.name || marketKey,
+            oddsObj,
+        });
+    });
+
+    const ordered = PREMATCH_SECTION_ORDER
+        .filter((sectionKey) => groups.has(sectionKey))
+        .map((sectionKey) => ({
+            sectionKey,
+            title: getPrematchSectionLabel(sectionKey),
+            markets: groups.get(sectionKey) || [],
+        }));
+
+    Array.from(groups.keys())
+        .filter((sectionKey) => !PREMATCH_SECTION_ORDER.includes(sectionKey))
+        .forEach((sectionKey) => {
+            ordered.push({
+                sectionKey,
+                title: getPrematchSectionLabel(sectionKey),
+                markets: groups.get(sectionKey) || [],
+            });
+        });
+
+    return ordered;
+}
+
 /** 新加坡时间当天 0 点的毫秒时间戳 */
 function getStartOfDaySingapore(date) {
     const f = new Intl.DateTimeFormat("en-CA", {
@@ -1048,6 +1098,7 @@ export default function SoccerEarlyMarketPage() {
     // 日期 Tab：0=今日，1..9=往后 9 天
     const [selectedDayIndex, setSelectedDayIndex] = useState(0);
     const selectedDayTs = getSelectedDayTimestamp(selectedDayIndex);
+    const isBasketballLeague = Number(selectedLeague?.sportId ?? sportId) === 18;
 
 
     useEffect(() => {
@@ -1977,7 +2028,9 @@ export default function SoccerEarlyMarketPage() {
                         marginBottom: 12,
                     }}
                 >
-                    <div style={{ fontSize: 18, fontWeight: 700 }}>足球早盘 / 比赛列表</div>
+                    <div style={{ fontSize: 18, fontWeight: 700 }}>
+                        {type === "1" ? "滚球" : (isBasketballLeague ? "篮球早盘 / 比赛列表" : "足球早盘 / 比赛列表")}
+                    </div>
                     <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
                         左侧联赛，右侧比赛列表。点击联赛后自动请求 bet365/all。
                     </div>
@@ -2393,28 +2446,73 @@ export default function SoccerEarlyMarketPage() {
                                                         />
                                                     ))}
                                                 </div>
+                                            ) : isBasketballLeague ? (
+                                                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                                                    {getPrematchMarketGroups(match).map((section) => (
+                                                        <div
+                                                            key={section.sectionKey}
+                                                            style={{
+                                                                border: "1px solid #e5e7eb",
+                                                                borderRadius: 12,
+                                                                background: "#f8fafc",
+                                                                padding: 12,
+                                                            }}
+                                                        >
+                                                            <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginBottom: 10 }}>
+                                                                {section.title}
+                                                            </div>
+                                                            <div
+                                                                style={{
+                                                                    display: "grid",
+                                                                    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                                                                    gap: 12,
+                                                                }}
+                                                            >
+                                                                {section.markets.map(({ marketKey, label, oddsObj }) => (
+                                                                    <div
+                                                                        key={marketKey}
+                                                                        style={{
+                                                                            background: "#fff",
+                                                                            border: "1px solid #e5e7eb",
+                                                                            borderRadius: 10,
+                                                                            padding: 10,
+                                                                        }}
+                                                                    >
+                                                                        <MarketOddsCell
+                                                                            marketKey={marketKey}
+                                                                            label={label}
+                                                                            oddsObj={oddsObj}
+                                                                            match={match}
+                                                                            onAddSlip={addToSlip}
+                                                                        />
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             ) : (
-                                            <div
-                                                style={{
-                                                    display: "grid",
-                                                    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-                                                    gap: 12,
-                                                }}
-                                            >
-                                                {MAIN_MARKET_KEYS.map(({ key: mk, label }) => {
-                                                    const oddsObj = match?.odds?.[mk];
-                                                    return (
-                                                        <MarketOddsCell
-                                                            key={mk}
-                                                            marketKey={mk}
-                                                            label={label}
-                                                            oddsObj={oddsObj}
-                                                            match={match}
-                                                            onAddSlip={addToSlip}
-                                                        />
-                                                    );
-                                                })}
-                                            </div>
+                                                <div
+                                                    style={{
+                                                        display: "grid",
+                                                        gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+                                                        gap: 12,
+                                                    }}
+                                                >
+                                                    {MAIN_MARKET_KEYS.map(({ key: mk, label }) => {
+                                                        const oddsObj = match?.odds?.[mk];
+                                                        return (
+                                                            <MarketOddsCell
+                                                                key={mk}
+                                                                marketKey={mk}
+                                                                label={label}
+                                                                oddsObj={oddsObj}
+                                                                match={match}
+                                                                onAddSlip={addToSlip}
+                                                            />
+                                                        );
+                                                    })}
+                                                </div>
                                             )}
 
                                             {match?.id != null && (
