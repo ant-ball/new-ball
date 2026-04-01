@@ -1,8 +1,8 @@
-const BALL_TOKEN_KEY = "ball_auth_token";
+import { clearBallToken, getBallToken, getUrlToken, persistBallToken } from "./session";
 
 export function getStoredBallToken() {
   try {
-    return localStorage.getItem(BALL_TOKEN_KEY) || "";
+    return getBallToken();
   } catch {
     return "";
   }
@@ -10,8 +10,8 @@ export function getStoredBallToken() {
 
 export function setStoredBallToken(token) {
   try {
-    if (token) localStorage.setItem(BALL_TOKEN_KEY, token);
-    else localStorage.removeItem(BALL_TOKEN_KEY);
+    if (token) persistBallToken(token);
+    else clearBallToken();
   } catch {
     // ignore
   }
@@ -19,8 +19,7 @@ export function setStoredBallToken(token) {
 
 export function getExternalTokenFromUrl() {
   try {
-    const params = new URLSearchParams(window.location.search || "");
-    return params.get("token") || "";
+    return getUrlToken();
   } catch {
     return "";
   }
