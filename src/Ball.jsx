@@ -2029,7 +2029,9 @@ export default function SoccerEarlyMarketPage() {
                     }}
                 >
                     <div style={{ fontSize: 18, fontWeight: 700 }}>
-                        {type === "1" ? "滚球" : (isBasketballLeague ? "篮球早盘 / 比赛列表" : "足球早盘 / 比赛列表")}
+                        {type === "1"
+                            ? (isBasketballLeague ? "篮球滚球 / 比赛列表" : "滚球 / 比赛列表")
+                            : (isBasketballLeague ? "篮球早盘 / 比赛列表" : "足球早盘 / 比赛列表")}
                     </div>
                     <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
                         左侧联赛，右侧比赛列表。点击联赛后自动请求 bet365/all。
@@ -2428,24 +2430,40 @@ export default function SoccerEarlyMarketPage() {
                                                 </div>
                                             </div>
 
-                                            {match?.timeStatus === "1" && Array.isArray(match?.treeResults) && match.treeResults.length > 0 ? (
-                                                <div
-                                                    style={{
-                                                        display: "grid",
-                                                        gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-                                                        gap: 12,
-                                                    }}
-                                                >
-                                                    {match.treeResults.filter(isMavoDisplayable).map((mavo, idx) => (
-                                                        <RollingMarketCell
-                                                            key={mavo.id || mavo.ID || idx}
-                                                            mavo={mavo}
-                                                            match={match}
-                                                            onAddSlip={addToSlip}
-                                                            highlight={highlight}
-                                                        />
-                                                    ))}
-                                                </div>
+                                            {match?.timeStatus === "1" ? (
+                                                Array.isArray(match?.treeResults) && match.treeResults.filter(isMavoDisplayable).length > 0 ? (
+                                                    <div
+                                                        style={{
+                                                            display: "grid",
+                                                            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                                                            gap: 12,
+                                                        }}
+                                                    >
+                                                        {match.treeResults.filter(isMavoDisplayable).map((mavo, idx) => (
+                                                            <RollingMarketCell
+                                                                key={mavo.id || mavo.ID || idx}
+                                                                mavo={mavo}
+                                                                match={match}
+                                                                onAddSlip={addToSlip}
+                                                                highlight={highlight}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <div
+                                                        style={{
+                                                            border: "1px dashed #cbd5e1",
+                                                            borderRadius: 12,
+                                                            padding: 18,
+                                                            background: "#f8fafc",
+                                                            color: "#64748b",
+                                                            fontSize: 13,
+                                                            textAlign: "center",
+                                                        }}
+                                                    >
+                                                        {isBasketballLeague ? "滚球赔率暂未返回，等待后端补齐滚球树形玩法" : "当前比赛暂无滚球赔率"}
+                                                    </div>
+                                                )
                                             ) : isBasketballLeague ? (
                                                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                                                     {getPrematchMarketGroups(match).map((section) => (
