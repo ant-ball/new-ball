@@ -50,6 +50,7 @@ export async function getLeagueGroup({
     const query = buildQuery({
         type,
         sportId,
+        sport_id: sportId,
         day: normalizeDayParam(day),
         daysOfTime,
     });
@@ -199,6 +200,7 @@ export async function getBet365All({
     day,
     leagueIds,
     daysOfTime = 1,
+    sportId = 1,
 } = {}) {
     if (leagueIds == null || leagueIds === "") {
         throw new Error("leagueIds 不能为空");
@@ -207,6 +209,8 @@ export async function getBet365All({
         day: normalizeDayParam(day),
         leagueIds,
         daysOfTime,
+        sportId,
+        sport_id: sportId,
     });
     const url = `${baseUrl}/soccer/event/bet365/all?${query}`;
     const { response, json } = await requestJson(url);

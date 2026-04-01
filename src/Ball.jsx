@@ -1240,6 +1240,7 @@ export default function SoccerEarlyMarketPage() {
                 day: type === "1" ? undefined : selectedDayTs,
                 leagueIds: league.leagueId,
                 daysOfTime: type === "1" ? undefined : 1,
+                sportId,
             })
                 .then((res) => {
                     setMatchRaw((prev) => mergeMatchRawPreferNewer(prev, {
@@ -1321,6 +1322,7 @@ export default function SoccerEarlyMarketPage() {
                 day: type === "1" ? undefined : selectedDayTs,
                 leagueIds: league.leagueId,
                 daysOfTime: type === "1" ? undefined : 1,
+                sportId,
             });
 
             setMatchRaw((prev) => mergeMatchRawPreferNewer(prev, {
