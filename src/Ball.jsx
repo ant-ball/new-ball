@@ -891,6 +891,18 @@ function getLiveClockDisplay(match, nowTick) {
     return `${halfLabel} ${safeMin}分${String(safeSec).padStart(2, "0")}秒`;
 }
 
+function getRawWsClockDisplay(match) {
+    if (!match) return null;
+    const rawTT = match?.TT ?? match?.tt ?? "";
+    const rawTM = match?.TM ?? match?.tm ?? "";
+    const rawTS = match?.TS ?? match?.ts ?? "";
+    const parts = [];
+    if (rawTT !== "") parts.push(`TT:${rawTT}`);
+    if (rawTM !== "") parts.push(`TM:${rawTM}`);
+    if (rawTS !== "") parts.push(`TS:${rawTS}`);
+    return parts.length > 0 ? parts.join(" ") : null;
+}
+
 /** 滚球赔率 分数转小数 (如 "4/5" -> 1.8，即 4/5+1) */
 function inplayOddsToDecimal(od) {
     if (od == null || od === "" || od === "-") return null;
@@ -2536,6 +2548,11 @@ export default function SoccerEarlyMarketPage() {
                                                     )}
                                                 </div>
                                                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                                                    {getRawWsClockDisplay(match) && (
+                                                        <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 600 }}>
+                                                            {getRawWsClockDisplay(match)}
+                                                        </span>
+                                                    )}
                                                     {match?.timeStatus === "1" && getLiveClockDisplay(match, clockTick) && (
                                                         <span style={{ fontSize: 12, color: "#0369a1", fontWeight: 600 }}>
                                                             {getLiveClockDisplay(match, clockTick)}
