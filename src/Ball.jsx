@@ -297,6 +297,42 @@ function mergeTreeResultsPreferNewer(existingTree, incomingTree) {
     return merged;
 }
 
+function mergeLiveClockState(prevMatch, nextMatch) {
+    if (!prevMatch || !nextMatch) return nextMatch;
+    const prevKey = prevMatch?.liveClockKey != null ? Number(prevMatch.liveClockKey) : null;
+    const nextKey = nextMatch?.liveClockKey != null ? Number(nextMatch.liveClockKey) : null;
+    const prevUpdatedAt = prevMatch?.liveClockUpdatedAt != null ? Number(prevMatch.liveClockUpdatedAt) : null;
+    const nextUpdatedAt = nextMatch?.liveClockUpdatedAt != null ? Number(nextMatch.liveClockUpdatedAt) : null;
+
+    const prevHasClock = prevMatch?.liveClockMinute != null || prevMatch?.liveClockSecond != null;
+    const nextHasClock = nextMatch?.liveClockMinute != null || nextMatch?.liveClockSecond != null;
+    const shouldKeepPrev =
+        prevHasClock &&
+        (!nextHasClock ||
+            (prevKey != null && nextKey != null && prevKey > nextKey) ||
+            (prevUpdatedAt != null && nextUpdatedAt != null && prevUpdatedAt > nextUpdatedAt));
+
+    if (!shouldKeepPrev) return nextMatch;
+
+    return {
+        ...nextMatch,
+        liveClockMinute: prevMatch.liveClockMinute,
+        liveClockSecond: prevMatch.liveClockSecond,
+        liveClockUpdatedAt: prevMatch.liveClockUpdatedAt,
+        liveHalf: prevMatch.liveHalf,
+        liveClockIsPeriodTime: prevMatch.liveClockIsPeriodTime,
+        liveClockOnBreak: prevMatch.liveClockOnBreak,
+        liveClockSource: prevMatch.liveClockSource,
+        liveClockKey: prevMatch.liveClockKey,
+        SS: nextMatch.SS ?? prevMatch.SS,
+        TM: nextMatch.TM ?? prevMatch.TM,
+        TS: nextMatch.TS ?? prevMatch.TS,
+        TU: nextMatch.TU ?? prevMatch.TU,
+        TT: nextMatch.TT ?? prevMatch.TT,
+        ballScore: nextMatch.ballScore ?? prevMatch.ballScore,
+    };
+}
+
 function mergeMatchRawPreferNewer(prevRaw, nextRaw) {
     if (!prevRaw) return hydrateMatchClockFromRawResponse(nextRaw);
     if (!nextRaw) return prevRaw;
@@ -322,8 +358,9 @@ function mergeMatchRawPreferNewer(prevRaw, nextRaw) {
             if (id == null) return match;
             const prevMatch = prevByMatchId.get(String(id));
             if (!prevMatch) return match;
+            const mergedClockMatch = mergeLiveClockState(prevMatch, match);
             const mergedMatch = {
-                ...match,
+                ...mergedClockMatch,
                 treeResults: mergeTreeResultsPreferNewer(prevMatch?.treeResults, match?.treeResults),
             };
             return hydrateMatchClockFromRawMatch(mergedMatch);
