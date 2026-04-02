@@ -165,35 +165,40 @@ function mergeMavoIntoMatchRaw(prevRaw, mavo) {
             const pushSec = mavo.tS ?? mavo.TS;
             const payloadHalf = parseHalfFromPayload(mavo);
             const isBreak = isTtBreak(mavo);
-            if (pushMin != null || pushSec != null) {
-                const min = pushMin != null ? Number(pushMin) : (updatedMatch.liveClockMinute ?? 0);
-                const sec = pushSec != null ? Number(pushSec) : (updatedMatch.liveClockSecond ?? 0);
-                updatedMatch = {
-                    ...updatedMatch,
-                    liveClockMinute: min,
-                    liveClockSecond: sec,
-                    liveClockUpdatedAt: Date.now(),
-                    liveHalf: payloadHalf != null ? payloadHalf : (min <= 45 ? 1 : 2),
-                    liveClockIsPeriodTime: true,
-                    liveClockOnBreak: isBreak,
-                };
-            } else {
-                const tuMs = parseTUToUtcMs(mavo.tU ?? mavo.TU);
-                const kickoffMs = getKickoffMs(match);
-                if (tuMs != null && kickoffMs != null) {
-                    const elapsedSec = Math.max(0, Math.floor((tuMs - kickoffMs) / 1000));
-                    const totalMin = Math.floor(elapsedSec / 60);
-                    const sec = Math.floor(elapsedSec % 60);
-                    const inferredHalf = totalMin < 45 ? 1 : 2;
+            // 计时以 event_result 为准；赔率推送只在没有 event_result 计时源时兜底。
+            if (updatedMatch.liveClockSource !== "event_result") {
+                if (pushMin != null || pushSec != null) {
+                    const min = pushMin != null ? Number(pushMin) : (updatedMatch.liveClockMinute ?? 0);
+                    const sec = pushSec != null ? Number(pushSec) : (updatedMatch.liveClockSecond ?? 0);
                     updatedMatch = {
                         ...updatedMatch,
-                        liveClockMinute: totalMin,
+                        liveClockMinute: min,
                         liveClockSecond: sec,
                         liveClockUpdatedAt: Date.now(),
-                        liveHalf: payloadHalf != null ? payloadHalf : inferredHalf,
-                        liveClockIsPeriodTime: false,
+                        liveHalf: payloadHalf != null ? payloadHalf : (min <= 45 ? 1 : 2),
+                        liveClockIsPeriodTime: true,
                         liveClockOnBreak: isBreak,
+                        liveClockSource: "odds",
                     };
+                } else {
+                    const tuMs = parseTUToUtcMs(mavo.tU ?? mavo.TU);
+                    const kickoffMs = getKickoffMs(match);
+                    if (tuMs != null && kickoffMs != null) {
+                        const elapsedSec = Math.max(0, Math.floor((tuMs - kickoffMs) / 1000));
+                        const totalMin = Math.floor(elapsedSec / 60);
+                        const sec = Math.floor(elapsedSec % 60);
+                        const inferredHalf = totalMin < 45 ? 1 : 2;
+                        updatedMatch = {
+                            ...updatedMatch,
+                            liveClockMinute: totalMin,
+                            liveClockSecond: sec,
+                            liveClockUpdatedAt: Date.now(),
+                            liveHalf: payloadHalf != null ? payloadHalf : inferredHalf,
+                            liveClockIsPeriodTime: false,
+                            liveClockOnBreak: isBreak,
+                            liveClockSource: "odds",
+                        };
+                    }
                 }
             }
             return updatedMatch;
@@ -788,7 +793,10 @@ function inplayOddsToDecimal(od) {
     const s = String(od).trim();
     const parts = s.split("/").map((p) => parseFloat(p.trim()));
     if (parts.length !== 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1]) || parts[1] === 0) return null;
-    return Math.floor((parts[0] / parts[1] + 1) * 100) / 100;
+    const numerator = parts[0];
+    const denominator = parts[1];
+    // 用整数运算做截断，避免 JS 浮点误差导致 1.41 / 2.29 这类边界值偏移
+    return Math.floor(((numerator + denominator) * 100) / denominator) / 100;
 }
 
 // 主要玩法展示顺序（bet365 风格）
@@ -1199,6 +1207,7 @@ export default function SoccerEarlyMarketPage() {
                             next.liveHalf = liveHalf != null ? liveHalf : (next.liveClockMinute <= 45 ? 1 : 2);
                             next.liveClockIsPeriodTime = true;
                             next.liveClockOnBreak = false;
+                            next.liveClockSource = "event_result";
                         }
                         if (scoreStr != null) {
                             next.ballScore = scoreStr;
