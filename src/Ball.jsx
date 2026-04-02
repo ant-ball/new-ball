@@ -161,44 +161,44 @@ function mergeMavoIntoMatchRaw(prevRaw, mavo) {
             const pushScore = mavo.sS ?? mavo.SS;
             if (pushScore != null) updatedMatch.ballScore = String(pushScore);
 
-            const pushMin = mavo.tM ?? mavo.TM;
-            const pushSec = mavo.tS ?? mavo.TS;
             const payloadHalf = parseHalfFromPayload(mavo);
             const isBreak = isTtBreak(mavo);
-            // 计时以 event_result 为准；赔率推送只在没有 event_result 计时源时兜底。
-            if (updatedMatch.liveClockSource !== "event_result") {
-                if (pushMin != null || pushSec != null) {
-                    const min = pushMin != null ? Number(pushMin) : (updatedMatch.liveClockMinute ?? 0);
-                    const sec = pushSec != null ? Number(pushSec) : (updatedMatch.liveClockSecond ?? 0);
+            const clockFromTu = calcLiveClockFromKickoffTu(mavo.tU ?? mavo.TU);
+            if (clockFromTu != null) {
+                const incomingHalf = payloadHalf != null ? payloadHalf : clockFromTu.half;
+                const incomingKey = buildLiveClockKey(incomingHalf, clockFromTu.minute, clockFromTu.second);
+                const currentKey = updatedMatch.liveClockKey != null ? Number(updatedMatch.liveClockKey) : null;
+                if (incomingKey != null && (currentKey == null || incomingKey >= currentKey)) {
+                    updatedMatch = {
+                        ...updatedMatch,
+                        liveClockMinute: clockFromTu.minute,
+                        liveClockSecond: clockFromTu.second,
+                        liveClockUpdatedAt: Date.now(),
+                        liveHalf: incomingHalf,
+                        liveClockIsPeriodTime: false,
+                        liveClockOnBreak: isBreak,
+                        liveClockSource: "odds",
+                        liveClockKey: incomingKey,
+                    };
+                }
+            } else if (mavo.tM != null || mavo.tS != null || mavo.TM != null || mavo.TS != null) {
+                const min = Number(mavo.tM ?? mavo.TM ?? updatedMatch.liveClockMinute ?? 0);
+                const sec = Number(mavo.tS ?? mavo.TS ?? updatedMatch.liveClockSecond ?? 0);
+                const incomingHalf = payloadHalf != null ? payloadHalf : (min <= 45 ? 1 : 2);
+                const incomingKey = buildLiveClockKey(incomingHalf, min, sec);
+                const currentKey = updatedMatch.liveClockKey != null ? Number(updatedMatch.liveClockKey) : null;
+                if (incomingKey != null && (currentKey == null || incomingKey >= currentKey)) {
                     updatedMatch = {
                         ...updatedMatch,
                         liveClockMinute: min,
                         liveClockSecond: sec,
                         liveClockUpdatedAt: Date.now(),
-                        liveHalf: payloadHalf != null ? payloadHalf : (min <= 45 ? 1 : 2),
+                        liveHalf: incomingHalf,
                         liveClockIsPeriodTime: true,
                         liveClockOnBreak: isBreak,
                         liveClockSource: "odds",
+                        liveClockKey: incomingKey,
                     };
-                } else {
-                    const tuMs = parseTUToUtcMs(mavo.tU ?? mavo.TU);
-                    const kickoffMs = getKickoffMs(match);
-                    if (tuMs != null && kickoffMs != null) {
-                        const elapsedSec = Math.max(0, Math.floor((tuMs - kickoffMs) / 1000));
-                        const totalMin = Math.floor(elapsedSec / 60);
-                        const sec = Math.floor(elapsedSec % 60);
-                        const inferredHalf = totalMin < 45 ? 1 : 2;
-                        updatedMatch = {
-                            ...updatedMatch,
-                            liveClockMinute: totalMin,
-                            liveClockSecond: sec,
-                            liveClockUpdatedAt: Date.now(),
-                            liveHalf: payloadHalf != null ? payloadHalf : inferredHalf,
-                            liveClockIsPeriodTime: false,
-                            liveClockOnBreak: isBreak,
-                            liveClockSource: "odds",
-                        };
-                    }
                 }
             }
             return updatedMatch;
@@ -555,6 +555,27 @@ function parseHalfFromPayload(mavo) {
         if (n === 1) return 2;
     }
     return null;
+}
+
+function buildLiveClockKey(half, minute, second) {
+    const halfNum = Number(half);
+    const minNum = Number(minute);
+    const secNum = Number(second);
+    if (!Number.isFinite(halfNum) || !Number.isFinite(minNum) || !Number.isFinite(secNum)) return null;
+    const safeHalf = Math.max(1, Math.min(2, halfNum));
+    const safeMin = Math.max(0, minNum);
+    const safeSec = Math.max(0, Math.min(59, secNum));
+    return safeHalf * 100000 + safeMin * 60 + safeSec;
+}
+
+function calcLiveClockFromKickoffTu(tuStr) {
+    const kickoffMs = parseTUToUtcMs(tuStr);
+    if (kickoffMs == null) return null;
+    const elapsedSec = Math.max(0, Math.floor((Date.now() - kickoffMs) / 1000));
+    const minute = Math.floor(elapsedSec / 60);
+    const second = Math.floor(elapsedSec % 60);
+    const half = minute < 45 ? 1 : 2;
+    return { kickoffMs, minute, second, half, key: buildLiveClockKey(half, minute, second) };
 }
 
 /** 比赛开球时间（UTC 毫秒） */
@@ -1184,12 +1205,12 @@ export default function SoccerEarlyMarketPage() {
                 const eventIdStr = item.eventId != null ? String(item.eventId) : (item.bet365Id != null ? String(item.bet365Id) : null);
                 if (!eventIdStr) continue;
                 const timeStatus = item.timeStatus != null ? String(item.timeStatus) : null;
-                const minute = item.tm != null ? Number(item.tm) : null;
-                const second = item.ts != null ? Number(item.ts) : null;
                 const scoreStr = item.ss != null ? String(item.ss) : (item.ballScore != null ? String(item.ballScore) : null);
-                const liveMin = Number.isFinite(minute) ? Math.max(0, minute) : null;
-                const liveSec = Number.isFinite(second) ? Math.max(0, Math.min(59, second)) : null;
-                const liveHalf = liveMin != null ? (liveMin <= 45 ? 1 : 2) : null;
+                const clockFromTu = calcLiveClockFromKickoffTu(item.tU ?? item.TU);
+                const liveHalfFromPayload = parseHalfFromPayload(item);
+                const liveHalf = liveHalfFromPayload != null
+                    ? liveHalfFromPayload
+                    : (clockFromTu != null ? clockFromTu.half : null);
 
                 outer: for (const group of inPlay) {
                     const value = group?.value;
@@ -1200,14 +1221,17 @@ export default function SoccerEarlyMarketPage() {
                         if (mid !== eventIdStr) continue;
                         const next = { ...match };
                         if (timeStatus != null) next.timeStatus = timeStatus;
-                        if (liveMin != null || liveSec != null) {
-                            next.liveClockMinute = liveMin != null ? liveMin : (next.liveClockMinute ?? 0);
-                            next.liveClockSecond = liveSec != null ? liveSec : (next.liveClockSecond ?? 0);
+                        const nextKey = clockFromTu != null ? clockFromTu.key : null;
+                        const currentKey = next.liveClockKey != null ? Number(next.liveClockKey) : null;
+                        if (nextKey != null && (currentKey == null || nextKey >= currentKey)) {
+                            next.liveClockMinute = clockFromTu.minute;
+                            next.liveClockSecond = clockFromTu.second;
                             next.liveClockUpdatedAt = Date.now();
-                            next.liveHalf = liveHalf != null ? liveHalf : (next.liveClockMinute <= 45 ? 1 : 2);
+                            next.liveHalf = liveHalf != null ? liveHalf : clockFromTu.half;
                             next.liveClockIsPeriodTime = true;
                             next.liveClockOnBreak = false;
                             next.liveClockSource = "event_result";
+                            next.liveClockKey = nextKey;
                         }
                         if (scoreStr != null) {
                             next.ballScore = scoreStr;
