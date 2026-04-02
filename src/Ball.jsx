@@ -160,29 +160,38 @@ function mergeMavoIntoMatchRaw(prevRaw, mavo) {
             let updatedMatch = { ...match, treeResults: tree };
             const pushScore = mavo.sS ?? mavo.SS;
             if (pushScore != null) updatedMatch.ballScore = String(pushScore);
+            const pushQuarter = mavo.q ?? mavo.Q;
+            const pushQuarterNum = Number(pushQuarter);
+            if (Number.isFinite(pushQuarterNum)) {
+                updatedMatch.q = pushQuarterNum;
+                updatedMatch.Q = pushQuarterNum;
+            }
 
-            const payloadHalf = parseHalfFromPayload(mavo);
-            const isBreak = isTtBreak(mavo);
-            const pushMin = mavo.tM ?? mavo.TM;
-            const pushSec = mavo.tS ?? mavo.TS;
-            if (pushMin != null || pushSec != null) {
-                const min = pushMin != null ? Number(pushMin) : (updatedMatch.liveClockMinute ?? 0);
-                const sec = pushSec != null ? Number(pushSec) : (updatedMatch.liveClockSecond ?? 0);
-                const incomingHalf = payloadHalf != null ? payloadHalf : (min <= 45 ? 1 : 2);
-                const incomingKey = buildLiveClockKey(incomingHalf, min, sec);
-                const currentKey = updatedMatch.liveClockKey != null ? Number(updatedMatch.liveClockKey) : null;
-                if (incomingKey != null && (currentKey == null || incomingKey >= currentKey)) {
-                    updatedMatch = {
-                        ...updatedMatch,
-                        liveClockMinute: min,
-                        liveClockSecond: sec,
-                        liveClockUpdatedAt: Date.now(),
-                        liveHalf: incomingHalf,
-                        liveClockIsPeriodTime: true,
-                        liveClockOnBreak: isBreak,
-                        liveClockSource: "odds",
-                        liveClockKey: incomingKey,
-                    };
+            const shouldProtectEventClock = updatedMatch.liveClockSource === "event_result";
+            if (!shouldProtectEventClock) {
+                const payloadHalf = parseHalfFromPayload(mavo);
+                const isBreak = isTtBreak(mavo);
+                const pushMin = mavo.tM ?? mavo.TM;
+                const pushSec = mavo.tS ?? mavo.TS;
+                if (pushMin != null || pushSec != null) {
+                    const min = pushMin != null ? Number(pushMin) : (updatedMatch.liveClockMinute ?? 0);
+                    const sec = pushSec != null ? Number(pushSec) : (updatedMatch.liveClockSecond ?? 0);
+                    const incomingHalf = payloadHalf != null ? payloadHalf : (min <= 45 ? 1 : 2);
+                    const incomingKey = buildLiveClockKey(incomingHalf, min, sec);
+                    const currentKey = updatedMatch.liveClockKey != null ? Number(updatedMatch.liveClockKey) : null;
+                    if (incomingKey != null && (currentKey == null || incomingKey >= currentKey)) {
+                        updatedMatch = {
+                            ...updatedMatch,
+                            liveClockMinute: min,
+                            liveClockSecond: sec,
+                            liveClockUpdatedAt: Date.now(),
+                            liveHalf: incomingHalf,
+                            liveClockIsPeriodTime: true,
+                            liveClockOnBreak: isBreak,
+                            liveClockSource: "odds",
+                            liveClockKey: incomingKey,
+                        };
+                    }
                 }
             }
             updatedMatch = hydrateMatchClockFromRawMatch(updatedMatch);
@@ -299,6 +308,30 @@ function mergeTreeResultsPreferNewer(existingTree, incomingTree) {
 
 function mergeLiveClockState(prevMatch, nextMatch) {
     if (!prevMatch || !nextMatch) return nextMatch;
+    const prevIsEvent = prevMatch?.liveClockSource === "event_result";
+    const nextIsEvent = nextMatch?.liveClockSource === "event_result";
+    if (prevIsEvent && !nextIsEvent) {
+        return {
+            ...nextMatch,
+            liveClockMinute: prevMatch.liveClockMinute,
+            liveClockSecond: prevMatch.liveClockSecond,
+            liveClockUpdatedAt: prevMatch.liveClockUpdatedAt,
+            liveHalf: prevMatch.liveHalf,
+            liveClockIsPeriodTime: prevMatch.liveClockIsPeriodTime,
+            liveClockOnBreak: prevMatch.liveClockOnBreak,
+            liveClockSource: prevMatch.liveClockSource,
+            liveClockKey: prevMatch.liveClockKey,
+            SS: nextMatch.SS ?? prevMatch.SS,
+            TM: nextMatch.TM ?? prevMatch.TM,
+            TS: nextMatch.TS ?? prevMatch.TS,
+            TU: nextMatch.TU ?? prevMatch.TU,
+            TT: nextMatch.TT ?? prevMatch.TT,
+            ballScore: nextMatch.ballScore ?? prevMatch.ballScore,
+        };
+    }
+    if (nextIsEvent && !prevIsEvent) {
+        return nextMatch;
+    }
     const prevKey = prevMatch?.liveClockKey != null ? Number(prevMatch.liveClockKey) : null;
     const nextKey = nextMatch?.liveClockKey != null ? Number(nextMatch.liveClockKey) : null;
     const prevUpdatedAt = prevMatch?.liveClockUpdatedAt != null ? Number(prevMatch.liveClockUpdatedAt) : null;
@@ -324,6 +357,8 @@ function mergeLiveClockState(prevMatch, nextMatch) {
         liveClockOnBreak: prevMatch.liveClockOnBreak,
         liveClockSource: prevMatch.liveClockSource,
         liveClockKey: prevMatch.liveClockKey,
+        q: nextMatch.q ?? prevMatch.q,
+        Q: nextMatch.Q ?? prevMatch.Q,
         SS: nextMatch.SS ?? prevMatch.SS,
         TM: nextMatch.TM ?? prevMatch.TM,
         TS: nextMatch.TS ?? prevMatch.TS,
@@ -863,8 +898,8 @@ function getScore(match) {
     return "-";
 }
 
-/** 滚球进行时间展示：上半场/下半场 XX分XX秒。TT=break 时停止读秒，只显示推送的 TM/TS */
-function getLiveClockDisplay(match, nowTick) {
+/** 滚球进行时间展示：篮球优先显示第几节，足球显示上/下半场。TT=break 时停止读秒，只显示推送的 TM/TS */
+function getLiveClockDisplay(match, nowTick, sportIdValue = null) {
     if (match?.timeStatus !== "1") return null;
     const onBreak = match?.liveClockOnBreak === true;
     const baseMinRaw = match?.liveClockMinute ?? match?.tm ?? match?.TM;
@@ -877,18 +912,23 @@ function getLiveClockDisplay(match, nowTick) {
     const updatedAt = match?.liveClockUpdatedAt;
     if (updatedAt == null && baseMin == null && baseSec == null) return null;
     const totalSec = baseMin * 60 + baseSec + (onBreak ? 0 : (updatedAt != null && nowTick != null ? Math.max(0, Math.floor((nowTick - updatedAt) / 1000)) : 0));
+    const isBasketball = Number(sportIdValue ?? match?.sportId ?? match?.sport_id) === 18;
+    const latestMavo = getLatestRollingMavo(match);
+    const quarterRaw = match?.q ?? match?.Q ?? latestMavo?.q ?? latestMavo?.Q ?? match?.liveQuarter ?? match?.livePeriod;
+    const quarterNum = Number(quarterRaw);
     const half = match?.liveHalf ?? parseHalfFromPayload(match) ?? (baseMin < 45 ? 1 : 2);
     const halfLabel = half === 1 ? "上半场" : "下半场";
+    const periodLabel = isBasketball && Number.isFinite(quarterNum) && quarterNum > 0 ? `第${quarterNum}节` : halfLabel;
     const isPeriodTime = match?.liveClockIsPeriodTime === true;
     const displayMin = isPeriodTime
         ? Math.floor(totalSec / 60)
-        : (half === 1 ? Math.floor(totalSec / 60) : Math.floor((totalSec - 45 * 60) / 60));
+        : (isBasketball ? Math.floor(totalSec / 60) : (half === 1 ? Math.floor(totalSec / 60) : Math.floor((totalSec - 45 * 60) / 60)));
     const displaySec = isPeriodTime
         ? Math.floor(totalSec % 60)
-        : (half === 1 ? Math.floor(totalSec % 60) : Math.floor((totalSec - 45 * 60) % 60));
+        : (isBasketball ? Math.floor(totalSec % 60) : (half === 1 ? Math.floor(totalSec % 60) : Math.floor((totalSec - 45 * 60) % 60)));
     const safeMin = Math.max(0, displayMin);
     const safeSec = Math.max(0, Math.min(59, displaySec));
-    return `${halfLabel} ${safeMin}分${String(safeSec).padStart(2, "0")}秒`;
+    return `${periodLabel} ${safeMin}分${String(safeSec).padStart(2, "0")}秒`;
 }
 
 function getLatestRollingMavo(match) {
@@ -915,10 +955,12 @@ function getRawWsClockDisplay(match) {
     const rawTT = source?.TT ?? source?.tt ?? "";
     const rawTM = source?.TM ?? source?.tm ?? "";
     const rawTS = source?.TS ?? source?.ts ?? "";
+    const rawQ = source?.Q ?? source?.q ?? "";
     const parts = [];
     if (rawTT !== "") parts.push(`TT:${rawTT}`);
     if (rawTM !== "") parts.push(`TM:${rawTM}`);
     if (rawTS !== "") parts.push(`TS:${rawTS}`);
+    if (rawQ !== "") parts.push(`Q:${rawQ}`);
     return parts.length > 0 ? parts.join(" ") : null;
 }
 
@@ -1322,6 +1364,8 @@ export default function SoccerEarlyMarketPage() {
                 const scoreStr = item.ss != null ? String(item.ss) : (item.ballScore != null ? String(item.ballScore) : null);
                 const minute = item.tm != null ? Number(item.tm) : (item.tM != null ? Number(item.tM) : null);
                 const second = item.ts != null ? Number(item.ts) : (item.tS != null ? Number(item.tS) : null);
+                const quarterRaw = item.q != null ? item.q : item.Q;
+                const quarterNum = Number(quarterRaw);
                 const liveMin = Number.isFinite(minute) ? Math.max(0, minute) : null;
                 const liveSec = Number.isFinite(second) ? Math.max(0, Math.min(59, second)) : null;
                 const liveHalfFromPayload = parseHalfFromPayload(item);
@@ -1338,6 +1382,10 @@ export default function SoccerEarlyMarketPage() {
                         if (mid !== eventIdStr) continue;
                         const next = { ...match };
                         if (timeStatus != null) next.timeStatus = timeStatus;
+                        if (Number.isFinite(quarterNum)) {
+                            next.q = quarterNum;
+                            next.Q = quarterNum;
+                        }
                         if (liveMin != null || liveSec != null) {
                             const nextKey = liveMin != null ? buildLiveClockKey(liveHalf != null ? liveHalf : 1, liveMin, liveSec ?? 0) : null;
                             const currentKey = next.liveClockKey != null ? Number(next.liveClockKey) : null;
@@ -2572,9 +2620,9 @@ export default function SoccerEarlyMarketPage() {
                                                             {getRawWsClockDisplay(match)}
                                                         </span>
                                                     )}
-                                                    {match?.timeStatus === "1" && getLiveClockDisplay(match, clockTick) && (
+                                                    {match?.timeStatus === "1" && getLiveClockDisplay(match, clockTick, selectedLeague?.sportId ?? sportId) && (
                                                         <span style={{ fontSize: 12, color: "#0369a1", fontWeight: 600 }}>
-                                                            {getLiveClockDisplay(match, clockTick)}
+                                                            {getLiveClockDisplay(match, clockTick, selectedLeague?.sportId ?? sportId)}
                                                         </span>
                                                     )}
                                                     {(match?.timeStatus === "1" || match?.ballScore) && getScore(match) !== "-" && (
