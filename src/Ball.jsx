@@ -179,6 +179,7 @@ function mergeMavoIntoMatchRaw(prevRaw, mavo) {
                         liveClockOnBreak: isBreak,
                         liveClockSource: "odds",
                         liveClockKey: incomingKey,
+                        liveClockKickoffMs: clockFromTu.kickoffMs,
                     };
                 }
             } else if (mavo.tM != null || mavo.tS != null || mavo.TM != null || mavo.TS != null) {
@@ -198,6 +199,7 @@ function mergeMavoIntoMatchRaw(prevRaw, mavo) {
                         liveClockOnBreak: isBreak,
                         liveClockSource: "odds",
                         liveClockKey: incomingKey,
+                        liveClockKickoffMs: clockFromTu?.kickoffMs ?? updatedMatch.liveClockKickoffMs ?? null,
                     };
                 }
             }
@@ -578,6 +580,17 @@ function calcLiveClockFromKickoffTu(tuStr) {
     return { kickoffMs, minute, second, half, key: buildLiveClockKey(half, minute, second) };
 }
 
+function getMatchKickoffMs(match) {
+    const direct = match?.liveClockKickoffMs;
+    if (direct != null && Number.isFinite(Number(direct))) return Number(direct);
+    const tree = Array.isArray(match?.treeResults) ? match.treeResults : [];
+    for (const mavo of tree) {
+        const clock = calcLiveClockFromKickoffTu(mavo?.tU ?? mavo?.TU);
+        if (clock != null) return clock.kickoffMs;
+    }
+    return null;
+}
+
 /** 比赛开球时间（UTC 毫秒） */
 function getKickoffMs(match) {
     const t = match?.time ?? match?.matchTime ?? match?.startTime ?? match?.eventTime;
@@ -786,15 +799,21 @@ function getScore(match) {
 /** 滚球进行时间展示：上半场/下半场 XX分XX秒。TT=break 时停止读秒，只显示推送的 TM/TS */
 function getLiveClockDisplay(match, nowTick) {
     if (match?.timeStatus !== "1") return null;
+    const onBreak = match?.liveClockOnBreak === true;
+    const kickoffMs = getMatchKickoffMs(match);
     const baseMin = match?.liveClockMinute ?? 0;
     const baseSec = match?.liveClockSecond ?? 0;
     const updatedAt = match?.liveClockUpdatedAt;
-    if (updatedAt == null && baseMin === 0 && baseSec === 0) return null;
-    const baseTotalSec = baseMin * 60 + baseSec;
-    const onBreak = match?.liveClockOnBreak === true;
-    const elapsedSec = onBreak ? 0 : (updatedAt != null && nowTick != null ? Math.max(0, Math.floor((nowTick - updatedAt) / 1000)) : 0);
-    const totalSec = baseTotalSec + elapsedSec;
-    const half = match?.liveHalf ?? (baseMin < 45 ? 1 : 2);
+    const liveFromKickoff = !onBreak && Number.isFinite(kickoffMs) && nowTick != null
+        ? Math.max(0, Math.floor((nowTick - kickoffMs) / 1000))
+        : null;
+    const totalSec = liveFromKickoff != null
+        ? liveFromKickoff
+        : (updatedAt != null ? (baseMin * 60 + baseSec + Math.max(0, Math.floor((nowTick - updatedAt) / 1000))) : (baseMin * 60 + baseSec));
+    if (!Number.isFinite(totalSec) || (totalSec === 0 && updatedAt == null && kickoffMs == null && baseMin === 0 && baseSec === 0)) return null;
+    const half = Number.isFinite(kickoffMs)
+        ? (totalSec < 45 * 60 ? 1 : 2)
+        : (match?.liveHalf ?? (baseMin < 45 ? 1 : 2));
     const halfLabel = half === 1 ? "上半场" : "下半场";
     const isPeriodTime = match?.liveClockIsPeriodTime === true;
     const displayMin = isPeriodTime
@@ -1232,6 +1251,7 @@ export default function SoccerEarlyMarketPage() {
                             next.liveClockOnBreak = false;
                             next.liveClockSource = "event_result";
                             next.liveClockKey = nextKey;
+                            next.liveClockKickoffMs = clockFromTu.kickoffMs;
                         }
                         if (scoreStr != null) {
                             next.ballScore = scoreStr;
