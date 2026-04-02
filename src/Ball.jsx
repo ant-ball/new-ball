@@ -891,11 +891,30 @@ function getLiveClockDisplay(match, nowTick) {
     return `${halfLabel} ${safeMin}分${String(safeSec).padStart(2, "0")}秒`;
 }
 
+function getLatestRollingMavo(match) {
+    const tree = Array.isArray(match?.treeResults) ? match.treeResults : [];
+    if (tree.length === 0) return null;
+    let latest = null;
+    let latestUpdateAt = -1;
+    tree.forEach((mavo) => {
+        if (!mavo) return;
+        const updateAtRaw = mavo?.updateAt ?? mavo?.UpdateAt ?? -1;
+        const updateAt = Number(updateAtRaw);
+        if (!Number.isFinite(updateAt)) return;
+        if (latest == null || updateAt > latestUpdateAt) {
+            latest = mavo;
+            latestUpdateAt = updateAt;
+        }
+    });
+    return latest || tree[0] || null;
+}
+
 function getRawWsClockDisplay(match) {
     if (!match) return null;
-    const rawTT = match?.TT ?? match?.tt ?? "";
-    const rawTM = match?.TM ?? match?.tm ?? "";
-    const rawTS = match?.TS ?? match?.ts ?? "";
+    const source = getLatestRollingMavo(match) || match;
+    const rawTT = source?.TT ?? source?.tt ?? "";
+    const rawTM = source?.TM ?? source?.tm ?? "";
+    const rawTS = source?.TS ?? source?.ts ?? "";
     const parts = [];
     if (rawTT !== "") parts.push(`TT:${rawTT}`);
     if (rawTM !== "") parts.push(`TM:${rawTM}`);
