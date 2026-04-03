@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { getStoredBallToken } from "./auth";
 
 /** 服务端推送 type：与 KafkaWsConstant.WsMassage 一致 */
 export const EVENT_IN_PLAY_ODDS_UPDATE = "in_play_odds_update";
@@ -14,8 +15,9 @@ export const EVENT_EVENT_RESULT = "event_result";
 
 /**
  * 原生 WebSocket 连接 /ws/soccer：
- * 1. 直接连接 /ws/soccer（无 sid 握手、无需 token）。
- * 2. 连接成功后立即发 {"type":"subscribe","eventIds":[...],"topics":["inplay-league","league:leagueId"]}，服务端不返回 sid，直接等订阅。
+ * 1. 直接连接 /ws/soccer。
+ * 2. 连接成功后立即发 {"type":"subscribe","eventIds":[...],"topics":["inplay-league","league:leagueId"],"token":"..."}，服务端按订阅消息里的 token 识别商户。
+ * 3. 服务端不返回 sid，直接等订阅。
  * 3. 服务端推送格式 {"type":"xxx","data":...}，按 type 分发。
  */
 
@@ -63,8 +65,9 @@ export function useOddsSocket({ baseUrl, enabled, eventIds = [], leagueId = null
                 if (leagueIdRef.current != null && leagueIdRef.current !== "") {
                     topics.push(`league:${leagueIdRef.current}`);
                 }
-                lastSubscribedRef.current = JSON.stringify({ eventIds: ids, topics });
-                ws.send(JSON.stringify({ type: "subscribe", eventIds: ids, topics }));
+                const token = getStoredBallToken();
+                lastSubscribedRef.current = JSON.stringify({ eventIds: ids, topics, token });
+                ws.send(JSON.stringify({ type: "subscribe", eventIds: ids, topics, token }));
             };
 
             ws.onmessage = (ev) => {
@@ -126,10 +129,11 @@ export function useOddsSocket({ baseUrl, enabled, eventIds = [], leagueId = null
         if (leagueId != null && leagueId !== "") {
             topics.push(`league:${leagueId}`);
         }
-        const key = JSON.stringify({ eventIds: ids, topics });
+        const token = getStoredBallToken();
+        const key = JSON.stringify({ eventIds: ids, topics, token });
         if (lastSubscribedRef.current === key) return;
         lastSubscribedRef.current = key;
-        ws.send(JSON.stringify({ type: "subscribe", eventIds: ids, topics }));
+        ws.send(JSON.stringify({ type: "subscribe", eventIds: ids, topics, token }));
     }, [eventIds, leagueId]);
 
     return { connected };
