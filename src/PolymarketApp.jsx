@@ -7,6 +7,7 @@ import {
   fetchPolymarketResults,
   syncPolymarketEvents,
   syncPolymarketMarkets,
+  syncPolymarketPlays,
 } from "./polymarketApi";
 
 const TABS = [
@@ -52,6 +53,8 @@ function PolymarketApp({ baseUrl }) {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("markets");
   const [error, setError] = useState("");
+  const [playSyncing, setPlaySyncing] = useState(false);
+  const [playSyncTries, setPlaySyncTries] = useState(0);
   const [data, setData] = useState({
     events: [],
     markets: [],
@@ -88,6 +91,40 @@ function PolymarketApp({ baseUrl }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (loading || error || playSyncing) {
+      return;
+    }
+    if (data.plays.length > 0 || data.markets.length === 0) {
+      return;
+    }
+    if (playSyncTries >= 1) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setPlaySyncing(true);
+      try {
+        await syncPolymarketPlays(baseUrl);
+        if (!cancelled) {
+          setPlaySyncTries((prev) => prev + 1);
+          await load();
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err?.message || "同步玩法失败");
+        }
+      } finally {
+        if (!cancelled) {
+          setPlaySyncing(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, data.plays.length, data.markets.length, error, load, loading, playSyncing, playSyncTries]);
 
   const summary = useMemo(() => ([
     { label: "事件", value: data.events.length },
@@ -147,6 +184,25 @@ function PolymarketApp({ baseUrl }) {
           </button>
           <button type="button" className="polymarket-action-btn secondary" onClick={() => handleSync("markets")} disabled={refreshing}>
             同步市场
+          </button>
+          <button
+            type="button"
+            className="polymarket-action-btn secondary"
+            onClick={async () => {
+              setPlaySyncing(true);
+              setError("");
+              try {
+                await syncPolymarketPlays(baseUrl);
+                await load();
+              } catch (err) {
+                setError(err?.message || "同步玩法失败");
+              } finally {
+                setPlaySyncing(false);
+              }
+            }}
+            disabled={refreshing || playSyncing}
+          >
+            {playSyncing ? "同步玩法中..." : "同步玩法"}
           </button>
           <button type="button" className="polymarket-action-btn primary" onClick={load} disabled={loading || refreshing}>
             {loading || refreshing ? "刷新中..." : "刷新"}

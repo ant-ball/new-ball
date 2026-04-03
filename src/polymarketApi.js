@@ -71,3 +71,9 @@ export async function syncPolymarketMarkets(baseUrl) {
   return { url, data: unwrapData(json) || json };
 }
 
+export async function syncPolymarketPlays(baseUrl) {
+  const { url, json } = await requestJson(baseUrl, "/polymarket/sync/plays?offset=0&limit=200", {
+    method: "POST",
+  });
+  return { url, data: unwrapData(json) || json };
+}
