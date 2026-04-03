@@ -34,10 +34,23 @@ function formatPrice(value) {
   return num.toFixed(4).replace(/\.?0+$/, "");
 }
 
+function clampPercent(value) {
+  const num = Number(value);
+  if (Number.isNaN(num)) return 0;
+  return Math.max(0, Math.min(100, Math.round(num * 100)));
+}
+
+function deriveDisplayCards(plays, markets) {
+  if (Array.isArray(plays) && plays.length > 0) {
+    return plays.map((item) => ({ ...item, __kind: "play" }));
+  }
+  return (Array.isArray(markets) ? markets : []).map((item) => ({ ...item, __kind: "market" }));
+}
+
 function PolymarketApp({ baseUrl }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState("plays");
+  const [activeTab, setActiveTab] = useState("markets");
   const [error, setError] = useState("");
   const [data, setData] = useState({
     events: [],
@@ -89,6 +102,18 @@ function PolymarketApp({ baseUrl }) {
     if (activeTab === "results") return data.results;
     return data.plays;
   }, [activeTab, data]);
+
+  useEffect(() => {
+    if (!loading) {
+      if (data.plays.length > 0) {
+        setActiveTab("plays");
+      } else if (data.markets.length > 0) {
+        setActiveTab("markets");
+      } else if (data.events.length > 0) {
+        setActiveTab("events");
+      }
+    }
+  }, [loading, data.plays.length, data.markets.length, data.events.length]);
 
   const handleSync = useCallback(async (type) => {
     setRefreshing(true);
@@ -152,6 +177,11 @@ function PolymarketApp({ baseUrl }) {
       </section>
 
       {error ? <div className="pm-empty" style={{ color: "#dc2626" }}>{error}</div> : null}
+      {!error && !loading && data.plays.length === 0 && data.markets.length > 0 ? (
+        <div className="pm-empty">
+          玩法表暂时还没同步出来，当前用市场数据直接展示赔率。你可以先看市场卡片里的选项和价格。
+        </div>
+      ) : null}
       {loading ? <div className="pm-empty">正在加载 Polymarket 数据...</div> : null}
 
       {!loading && !error ? (
@@ -160,6 +190,7 @@ function PolymarketApp({ baseUrl }) {
             {currentList.map((item, index) => {
               if (activeTab === "plays") {
                 const latestPrices = Array.isArray(item.latestPrices) ? item.latestPrices : [];
+                const outcomeNames = parseMaybeJson(item.outcomesJson);
                 return (
                   <article className="polymarket-card" key={item.pmPlayId || item.id || index}>
                     <div className="polymarket-card-head">
@@ -174,12 +205,23 @@ function PolymarketApp({ baseUrl }) {
                       </div>
                     </div>
                     <div className="pm-options">
-                      {(parseMaybeJson(item.outcomesJson) || []).map?.((name, idx) => {
+                      {(Array.isArray(outcomeNames) ? outcomeNames : []).map((name, idx) => {
                         const priceRow = latestPrices.find((row) => Number(row.outcomeIndex) === Number(idx));
+                        const price = priceRow?.price ?? priceRow?.bestAsk ?? priceRow?.bestBid;
                         return (
                           <div className="pm-option" key={`${name}-${idx}`}>
                             <div className="pm-option-name">{String(name)}</div>
-                            <div className="pm-option-price">{formatPrice(priceRow?.price ?? priceRow?.bestAsk ?? priceRow?.bestBid)}</div>
+                            <div className="pm-option-price">{formatPrice(price)}</div>
+                            <div style={{ marginTop: 10, height: 8, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}>
+                              <div
+                                style={{
+                                  width: `${clampPercent(price) || 5}%`,
+                                  height: "100%",
+                                  borderRadius: 999,
+                                  background: "linear-gradient(90deg, #2563eb 0%, #60a5fa 100%)",
+                                }}
+                              />
+                            </div>
                           </div>
                         );
                       }) || (
@@ -207,19 +249,29 @@ function PolymarketApp({ baseUrl }) {
                         {item.status || "ACTIVE"}
                       </div>
                     </div>
+                    <div className="card-hint">市场卡片可直接查看选项和赔率条，适合当前玩法表还未同步完的情况。</div>
                     <div className="pm-options">
-                      <div className="pm-option">
-                        <div className="pm-option-name">流动性</div>
-                        <div className="pm-option-price">{formatPrice(item.liquidity)}</div>
-                      </div>
-                      <div className="pm-option">
-                        <div className="pm-option-name">成交量</div>
-                        <div className="pm-option-price">{formatPrice(item.volume)}</div>
-                      </div>
-                      <div className="pm-option">
-                        <div className="pm-option-name">结果</div>
-                        <div className="pm-option-price">{item.resolvedOutcome || "—"}</div>
-                      </div>
+                      {(Array.isArray(parseMaybeJson(item.outcomesJson)) ? parseMaybeJson(item.outcomesJson) : []).map((name, idx) => {
+                        const prices = Array.isArray(data.prices) ? data.prices : [];
+                        const priceRow = prices.find((row) => row.pmMarketId === item.pmMarketId && Number(row.outcomeIndex) === Number(idx));
+                        const price = priceRow?.price ?? priceRow?.bestAsk ?? priceRow?.bestBid;
+                        return (
+                          <div className="pm-option" key={`${item.pmMarketId}-${name}-${idx}`}>
+                            <div className="pm-option-name">{String(name)}</div>
+                            <div className="pm-option-price">{formatPrice(price)}</div>
+                            <div style={{ marginTop: 10, height: 8, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}>
+                              <div
+                                style={{
+                                  width: `${clampPercent(price) || 5}%`,
+                                  height: "100%",
+                                  borderRadius: 999,
+                                  background: "linear-gradient(90deg, #7c3aed 0%, #a78bfa 100%)",
+                                }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </article>
                 );
