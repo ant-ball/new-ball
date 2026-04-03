@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
+import './App.css';
 import Ball from './Ball';
 import { fetchUserBalance, fetchUserInfo, getExternalTokenFromUrl, getStoredBallToken, tokenLogin } from './auth';
+import PolymarketApp from './PolymarketApp';
 
 function App() {
   const [baseUrl] = useState('https://ball.skybit.shop');
@@ -8,6 +10,7 @@ function App() {
   const [authError, setAuthError] = useState('');
   const [userInfo, setUserInfo] = useState(null);
   const [balance, setBalance] = useState(null);
+  const [viewMode, setViewMode] = useState('ball');
 
   useEffect(() => {
     let cancelled = false;
@@ -47,26 +50,61 @@ function App() {
     };
   }, [baseUrl]);
 
+  const activeLabel = viewMode === 'ball' ? '球盘' : 'Polymarket';
+
   return (
-    <div className="container mx-auto py-8">
-      <header className="text-center mb-8">
-        <h1 className="text-2xl font-bold">ball</h1>
-        <div style={{ marginTop: 12, fontSize: 14, color: '#374151' }}>
+    <div className="app-shell">
+      <header className="app-topbar">
+        <div className="app-brand">
+          <div className="app-brand-mark">B</div>
+          <div>
+            <div className="app-brand-title">ball</div>
+            <div className="app-brand-subtitle">隔离视图切换</div>
+          </div>
+        </div>
+        <div className="app-mode-switch" role="tablist" aria-label="view mode switch">
+          <button
+            type="button"
+            className={viewMode === 'ball' ? 'app-mode-btn active' : 'app-mode-btn'}
+            onClick={() => setViewMode('ball')}
+          >
+            球盘
+          </button>
+          <button
+            type="button"
+            className={viewMode === 'poly' ? 'app-mode-btn active' : 'app-mode-btn'}
+            onClick={() => setViewMode('poly')}
+          >
+            Polymarket
+          </button>
+        </div>
+      </header>
+
+      <section className="app-statusbar">
+        <div className="app-status-meta">
           {authLoading ? (
             <span>登录中...</span>
           ) : authError ? (
-            <span style={{ color: '#dc2626' }}>登录/余额失败：{authError}</span>
+            <span className="app-error">登录/余额失败：{authError}</span>
           ) : (
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <>
               <span>用户：{userInfo?.account || userInfo?.loginAccount || userInfo?.nickName || '-'}</span>
               <span>用户ID：{userInfo?.id || userInfo?.userId || '-'}</span>
               <span>余额：{balance?.amount ?? '-'}</span>
               <span>冻结：{balance?.froze ?? '-'}</span>
-            </div>
+            </>
           )}
         </div>
-      </header>
-      {!authLoading && !authError ? <Ball /> : null}
+        <div className="app-active-mode">当前视图：{activeLabel}</div>
+      </section>
+
+      <main className="app-main">
+        {authLoading ? null : authError ? null : viewMode === 'ball' ? (
+          <Ball />
+        ) : (
+          <PolymarketApp baseUrl={baseUrl} />
+        )}
+      </main>
     </div>
   );
 }
