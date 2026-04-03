@@ -137,15 +137,15 @@ function PolymarketApp({ baseUrl }) {
     if (activeTab === "events") return data.events;
     if (activeTab === "markets") return data.markets;
     if (activeTab === "results") return data.results;
-    return data.plays;
-  }, [activeTab, data]);
+    return deriveDisplayCards(data.plays, data.markets);
+  }, [activeTab, data.events, data.markets, data.plays, data.results]);
 
   useEffect(() => {
     if (!loading) {
       if (data.plays.length > 0) {
         setActiveTab("plays");
       } else if (data.markets.length > 0) {
-        setActiveTab("markets");
+        setActiveTab("plays");
       } else if (data.events.length > 0) {
         setActiveTab("events");
       }
@@ -194,6 +194,7 @@ function PolymarketApp({ baseUrl }) {
               try {
                 await syncPolymarketPlays(baseUrl);
                 await load();
+                setActiveTab("plays");
               } catch (err) {
                 setError(err?.message || "同步玩法失败");
               } finally {
@@ -247,11 +248,17 @@ function PolymarketApp({ baseUrl }) {
               if (activeTab === "plays") {
                 const latestPrices = Array.isArray(item.latestPrices) ? item.latestPrices : [];
                 const outcomeNames = parseMaybeJson(item.outcomesJson);
+                const displayName = item.__kind === "market" ? "市场玩法" : item.title || item.question || item.pmPlayId || "Polymarket 玩法";
+                const outcomeList = Array.isArray(outcomeNames) && outcomeNames.length > 0
+                  ? outcomeNames
+                  : Array.isArray(parseMaybeJson(item.outcomePricesJson)) && parseMaybeJson(item.outcomePricesJson).length > 0
+                    ? parseMaybeJson(item.outcomePricesJson)
+                    : [];
                 return (
                   <article className="polymarket-card" key={item.pmPlayId || item.id || index}>
                     <div className="polymarket-card-head">
                       <div>
-                        <h3 className="polymarket-card-title">{item.title || item.question || item.pmPlayId || "Polymarket 玩法"}</h3>
+                        <h3 className="polymarket-card-title">{displayName}</h3>
                         <div className="polymarket-card-subtitle">
                           市场：{item.pmMarketId || "-"} · 事件：{item.pmEventId || "-"} · 结果：{item.resolvedOutcome || "-"}
                         </div>
@@ -260,13 +267,19 @@ function PolymarketApp({ baseUrl }) {
                         {item.status || "ACTIVE"}
                       </div>
                     </div>
+                    <div className="card-hint">
+                      {item.__kind === "market"
+                        ? "玩法表还没同步完，先用市场数据生成玩法视图。"
+                        : "真实玩法表数据，已从 tbl_polymarket_play 读取。"}
+                    </div>
                     <div className="pm-options">
-                      {(Array.isArray(outcomeNames) ? outcomeNames : []).map((name, idx) => {
+                      {outcomeList.map((name, idx) => {
                         const priceRow = latestPrices.find((row) => Number(row.outcomeIndex) === Number(idx));
                         const price = priceRow?.price ?? priceRow?.bestAsk ?? priceRow?.bestBid;
+                        const optionName = typeof name === "object" ? (name?.name || name?.label || name?.outcome || `选项${idx + 1}`) : String(name);
                         return (
-                          <div className="pm-option" key={`${name}-${idx}`}>
-                            <div className="pm-option-name">{String(name)}</div>
+                          <div className="pm-option" key={`${optionName}-${idx}`}>
+                            <div className="pm-option-name">{optionName}</div>
                             <div className="pm-option-price">{formatPrice(price)}</div>
                             <div style={{ marginTop: 10, height: 8, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}>
                               <div
@@ -280,12 +293,13 @@ function PolymarketApp({ baseUrl }) {
                             </div>
                           </div>
                         );
-                      }) || (
+                      })}
+                      {outcomeList.length === 0 ? (
                         <div className="pm-option">
                           <div className="pm-option-name">未配置选项</div>
                           <div className="pm-option-price">—</div>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   </article>
                 );
