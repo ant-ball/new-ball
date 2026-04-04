@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchPolymarketEvents,
   fetchPolymarketMarkets,
@@ -9,6 +9,7 @@ import {
   syncPolymarketMarkets,
   syncPolymarketPlays,
 } from "./polymarketApi";
+import { usePolymarketSocket } from "./usePolymarketSocket";
 
 const TABS = [
   { key: "plays", label: "玩法" },
@@ -41,6 +42,62 @@ function formatProbability(value) {
   if (Number.isNaN(num)) return "—";
   const percent = num <= 1 ? num * 100 : num;
   return `${percent.toFixed(percent % 1 === 0 ? 0 : 1)}%`;
+}
+
+function translateSimple(text) {
+  if (text == null || text === "") return "";
+  const raw = String(text).trim();
+  const directMap = {
+    YES: "是",
+    NO: "否",
+    Yes: "是",
+    No: "否",
+    yes: "是",
+    no: "否",
+    ACTIVE: "进行中",
+    RESOLVED: "已结算",
+    CLOSED: "已关闭",
+    OPEN: "未开盘",
+    CANCELED: "已取消",
+    CANCELLED: "已取消",
+  };
+  if (directMap[raw]) {
+    return directMap[raw];
+  }
+  const phraseRules = [
+    [/^Will\s+(.+?)\s+be\s+canceled\s+or\s+postponed\s+by\s+(.+)\?$/i, (_, subject, deadline) => `${subject} 会在 ${deadline} 前被取消或延期吗？`],
+    [/^Will\s+(.+?)\s+win\s+the\s+(.+)\?$/i, (_, subject, eventName) => `${subject} 会赢得 ${eventName} 吗？`],
+    [/^Will\s+(.+?)\s+(.+)\?$/i, (_, subject, rest) => `是否会 ${subject} ${rest}？`],
+    [/^Who\s+will\s+win\s+(.+)\?$/i, (_, rest) => `谁将赢得 ${rest}？`],
+    [/^What\s+will\s+happen\s+to\s+(.+)\?$/i, (_, rest) => `${rest} 会怎样？`],
+    [/^Can\s+(.+)\?$/i, (_, rest) => `${rest} 可以吗？`],
+  ];
+  for (const [pattern, replacer] of phraseRules) {
+    if (pattern.test(raw)) {
+      return raw.replace(pattern, replacer);
+    }
+  }
+  return raw;
+}
+
+function translateOutcomeName(name) {
+  const raw = String(name == null ? "" : name).trim();
+  if (!raw) return "";
+  const directMap = {
+    YES: "是",
+    NO: "否",
+    Yes: "是",
+    No: "否",
+    yes: "是",
+    no: "否",
+    Draw: "平局",
+    DRAW: "平局",
+    draw: "平局",
+  };
+  if (directMap[raw]) {
+    return directMap[raw];
+  }
+  return translateSimple(raw);
 }
 
 function clampPercent(value) {
@@ -80,6 +137,8 @@ function PolymarketApp({ baseUrl }) {
   const [error, setError] = useState("");
   const [playSyncing, setPlaySyncing] = useState(false);
   const [playSyncTries, setPlaySyncTries] = useState(0);
+  const [socketConnected, setSocketConnected] = useState(false);
+  const reloadTimerRef = useRef(null);
   const [data, setData] = useState({
     events: [],
     markets: [],
@@ -88,7 +147,7 @@ function PolymarketApp({ baseUrl }) {
     results: [],
   });
 
-  const load = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -113,9 +172,46 @@ function PolymarketApp({ baseUrl }) {
     }
   }, [baseUrl]);
 
+  const loadLive = useCallback(async () => {
+    setError("");
+    try {
+      const [marketsRes, playsRes, pricesRes, resultsRes] = await Promise.all([
+        fetchPolymarketMarkets(baseUrl),
+        fetchPolymarketPlays(baseUrl),
+        fetchPolymarketPrices(baseUrl),
+        fetchPolymarketResults(baseUrl),
+      ]);
+      setData((prev) => ({
+        ...prev,
+        markets: Array.isArray(marketsRes.data) ? marketsRes.data : [],
+        plays: Array.isArray(playsRes.data) ? playsRes.data : [],
+        prices: Array.isArray(pricesRes.data) ? pricesRes.data : [],
+        results: Array.isArray(resultsRes.data) ? resultsRes.data : [],
+      }));
+    } catch (err) {
+      setError(err?.message || "Polymarket 刷新失败");
+    }
+  }, [baseUrl]);
+
+  const scheduleLiveRefresh = useCallback(() => {
+    if (reloadTimerRef.current) {
+      clearTimeout(reloadTimerRef.current);
+    }
+    reloadTimerRef.current = setTimeout(() => {
+      reloadTimerRef.current = null;
+      loadLive();
+    }, 350);
+  }, [loadLive]);
+
   useEffect(() => {
-    load();
-  }, [load]);
+    loadAll();
+    return () => {
+      if (reloadTimerRef.current) {
+        clearTimeout(reloadTimerRef.current);
+        reloadTimerRef.current = null;
+      }
+    };
+  }, [loadAll]);
 
   useEffect(() => {
     if (loading || error || playSyncing) {
@@ -134,7 +230,7 @@ function PolymarketApp({ baseUrl }) {
         await syncPolymarketPlays(baseUrl);
         if (!cancelled) {
           setPlaySyncTries((prev) => prev + 1);
-          await load();
+          await loadAll();
         }
       } catch (err) {
         if (!cancelled) {
@@ -149,7 +245,14 @@ function PolymarketApp({ baseUrl }) {
     return () => {
       cancelled = true;
     };
-  }, [baseUrl, data.plays.length, data.markets.length, error, load, loading, playSyncing, playSyncTries]);
+  }, [baseUrl, data.plays.length, data.markets.length, error, loadAll, loading, playSyncing, playSyncTries]);
+
+  usePolymarketSocket({
+    baseUrl,
+    enabled: true,
+    onRefresh: scheduleLiveRefresh,
+    onConnectedChange: setSocketConnected,
+  });
 
   const summary = useMemo(() => ([
     { label: "事件", value: data.events.length },
@@ -186,13 +289,13 @@ function PolymarketApp({ baseUrl }) {
       } else {
         await syncPolymarketMarkets(baseUrl);
       }
-      await load();
+      await loadAll();
     } catch (err) {
       setError(err?.message || "同步失败");
     } finally {
       setRefreshing(false);
     }
-  }, [baseUrl, load]);
+  }, [baseUrl, loadAll]);
 
   return (
     <div className="polymarket-shell">
@@ -201,6 +304,9 @@ function PolymarketApp({ baseUrl }) {
           <h2 className="polymarket-hero-title">Polymarket 独立视图</h2>
           <div className="polymarket-hero-desc">
             只看事件、市场、玩法、结果和价格，不复用现有球盘组件树。
+          </div>
+          <div className="polymarket-hero-desc" style={{ marginTop: 10, opacity: 0.9 }}>
+            实时通道：{socketConnected ? "WS 已连接" : "WS 未连接"}，价格变化会自动刷新。
           </div>
         </div>
         <div className="polymarket-actions">
@@ -218,7 +324,7 @@ function PolymarketApp({ baseUrl }) {
               setError("");
               try {
                 await syncPolymarketPlays(baseUrl);
-                await load();
+                await loadAll();
                 setActiveTab("plays");
               } catch (err) {
                 setError(err?.message || "同步玩法失败");
@@ -230,7 +336,7 @@ function PolymarketApp({ baseUrl }) {
           >
             {playSyncing ? "同步玩法中..." : "同步玩法"}
           </button>
-          <button type="button" className="polymarket-action-btn primary" onClick={load} disabled={loading || refreshing}>
+          <button type="button" className="polymarket-action-btn primary" onClick={loadAll} disabled={loading || refreshing}>
             {loading || refreshing ? "刷新中..." : "刷新"}
           </button>
         </div>
@@ -273,6 +379,7 @@ function PolymarketApp({ baseUrl }) {
               if (activeTab === "plays") {
                 const outcomeNames = parseMaybeJson(item.outcomesJson);
                 const displayName = item.__kind === "market" ? "市场玩法" : item.title || item.question || item.pmPlayId || "Polymarket 玩法";
+                const displayNameZh = translateSimple(item.title || item.question || item.pmPlayId || "Polymarket 玩法");
                 const outcomeList = Array.isArray(outcomeNames) && outcomeNames.length > 0
                   ? outcomeNames
                   : Array.isArray(parseMaybeJson(item.outcomePricesJson)) && parseMaybeJson(item.outcomePricesJson).length > 0
@@ -283,6 +390,9 @@ function PolymarketApp({ baseUrl }) {
                     <div className="polymarket-card-head">
                       <div>
                         <h3 className="polymarket-card-title">{displayName}</h3>
+                        <div className="polymarket-card-subtitle" style={{ marginTop: 6 }}>
+                          中文：{displayNameZh || "—"}
+                        </div>
                         <div className="polymarket-card-subtitle">
                           市场：{item.pmMarketId || "-"} · 事件：{item.pmEventId || "-"} · 结果：{item.resolvedOutcome || "-"}
                         </div>
@@ -300,9 +410,13 @@ function PolymarketApp({ baseUrl }) {
                       {outcomeList.map((name, idx) => {
                         const price = extractOutcomePrice(item, idx);
                         const optionName = typeof name === "object" ? (name?.name || name?.label || name?.outcome || `选项${idx + 1}`) : String(name);
+                        const optionNameZh = translateOutcomeName(optionName);
                         return (
                           <div className="pm-option" key={`${optionName}-${idx}`}>
                             <div className="pm-option-name">{optionName}</div>
+                            <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>
+                              中文：{optionNameZh || "—"}
+                            </div>
                             <div className="pm-option-price">
                               <div>{formatPrice(price)}</div>
                               <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
@@ -334,11 +448,15 @@ function PolymarketApp({ baseUrl }) {
               }
 
               if (activeTab === "markets") {
+                const marketTitleZh = translateSimple(item.question || item.description || item.pmMarketId || "Polymarket 市场");
                 return (
                   <article className="polymarket-card" key={item.pmMarketId || item.id || index}>
                     <div className="polymarket-card-head">
                       <div>
                         <h3 className="polymarket-card-title">{item.question || item.description || item.pmMarketId || "Polymarket 市场"}</h3>
+                        <div className="polymarket-card-subtitle" style={{ marginTop: 6 }}>
+                          中文：{marketTitleZh || "—"}
+                        </div>
                         <div className="polymarket-card-subtitle">
                           event：{item.pmEventId || "-"} · condition：{item.conditionId || "-"}
                         </div>
@@ -353,9 +471,13 @@ function PolymarketApp({ baseUrl }) {
                         const prices = Array.isArray(data.prices) ? data.prices : [];
                         const priceRow = prices.find((row) => row.pmMarketId === item.pmMarketId && Number(row.outcomeIndex) === Number(idx));
                         const price = priceRow?.price ?? priceRow?.bestAsk ?? priceRow?.bestBid;
+                        const optionNameZh = translateOutcomeName(String(name));
                         return (
                           <div className="pm-option" key={`${item.pmMarketId}-${name}-${idx}`}>
                             <div className="pm-option-name">{String(name)}</div>
+                            <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>
+                              中文：{optionNameZh || "—"}
+                            </div>
                             <div className="pm-option-price">
                               <div>{formatPrice(price)}</div>
                               <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
@@ -411,6 +533,9 @@ function PolymarketApp({ baseUrl }) {
                   <div className="polymarket-card-head">
                     <div>
                       <h3 className="polymarket-card-title">{item.title || item.slug || item.pmEventId || "Polymarket 事件"}</h3>
+                      <div className="polymarket-card-subtitle" style={{ marginTop: 6 }}>
+                        中文：{translateSimple(item.title || item.slug || item.pmEventId || "Polymarket 事件") || "—"}
+                      </div>
                       <div className="polymarket-card-subtitle">
                         category：{item.category || "-"} · sub：{item.subCategory || item.sub_category || "-"}
                       </div>
