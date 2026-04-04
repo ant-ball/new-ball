@@ -130,6 +130,60 @@ function deriveDisplayCards(plays, markets) {
   return (Array.isArray(markets) ? markets : []).map((item) => ({ ...item, __kind: "market" }));
 }
 
+function upsertByKey(list, keySelector, item) {
+  if (!Array.isArray(list) || !item) return Array.isArray(list) ? list : [];
+  const next = list.slice();
+  const key = keySelector(item);
+  const index = next.findIndex((row) => keySelector(row) === key);
+  if (index >= 0) {
+    next[index] = { ...next[index], ...item };
+  } else {
+    next.push(item);
+  }
+  return next;
+}
+
+function normalizePricePatch(message) {
+  const data = message?.data ?? message ?? {};
+  const pmMarketId = data.pmMarketId || data.pm_market_id;
+  const outcomeIndex = Number(data.outcomeIndex ?? data.outcome_index ?? 0);
+  if (!pmMarketId) {
+    return null;
+  }
+  return {
+    pmMarketId,
+    outcomeIndex,
+    outcomeName: data.outcomeName ?? data.outcome_name ?? null,
+    price: data.price ?? null,
+    bestBid: data.bestBid ?? data.best_bid ?? null,
+    bestAsk: data.bestAsk ?? data.best_ask ?? null,
+    sourceType: data.sourceType ?? data.source_type ?? "WS",
+    updateAt: data.updateAt ?? data.update_at ?? Date.now(),
+    rawJson: data.rawJson ?? data.raw_json ?? null,
+  };
+}
+
+function normalizeResultPatch(message) {
+  const data = message?.data ?? message ?? {};
+  const pmMarketId = data.pmMarketId || data.pm_market_id;
+  if (!pmMarketId) {
+    return null;
+  }
+  return {
+    pmMarketId,
+    resolvedOutcome: data.resolvedOutcome ?? data.resolved_outcome ?? null,
+    resolvedValue: data.resolvedValue ?? data.resolved_value ?? null,
+    resolutionSource: data.resolutionSource ?? data.resolution_source ?? null,
+    resolvedAt: data.resolvedAt ?? data.resolved_at ?? null,
+    rawJson: data.rawJson ?? data.raw_json ?? null,
+  };
+}
+
+function buildLatestPrices(prices, pmMarketId) {
+  if (!Array.isArray(prices)) return [];
+  return prices.filter((row) => row && row.pmMarketId === pmMarketId);
+}
+
 function PolymarketApp({ baseUrl }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -193,15 +247,72 @@ function PolymarketApp({ baseUrl }) {
     }
   }, [baseUrl]);
 
-  const scheduleLiveRefresh = useCallback(() => {
-    if (reloadTimerRef.current) {
-      clearTimeout(reloadTimerRef.current);
+  const applySocketPatch = useCallback((message) => {
+    if (!message || typeof message !== "object") {
+      return;
     }
-    reloadTimerRef.current = setTimeout(() => {
-      reloadTimerRef.current = null;
-      loadLive();
-    }, 350);
-  }, [loadLive]);
+    const type = message.type;
+    const payload = message.data ?? message;
+    if (type === "polymarket-price") {
+      const patch = normalizePricePatch(message);
+      if (!patch) return;
+      setData((prev) => {
+        const prices = upsertByKey(prev.prices, (row) => `${row.pmMarketId}:${row.outcomeIndex}`, patch);
+        const next = {
+          ...prev,
+          prices,
+        };
+        const latestPrices = buildLatestPrices(prices, patch.pmMarketId);
+        next.markets = prev.markets.map((item) => (item.pmMarketId === patch.pmMarketId ? { ...item, latestPrices } : item));
+        next.plays = prev.plays.map((item) => (item.pmMarketId === patch.pmMarketId ? { ...item, latestPrices } : item));
+        return next;
+      });
+      return;
+    }
+    if (type === "polymarket-result") {
+      const patch = normalizeResultPatch(message);
+      if (!patch) return;
+      setData((prev) => {
+        const results = upsertByKey(prev.results, (row) => row.pmMarketId || row.marketId, patch);
+        return {
+          ...prev,
+          results,
+          markets: prev.markets.map((item) => (
+            item.pmMarketId === patch.pmMarketId
+              ? {
+                  ...item,
+                  status: "RESOLVED",
+                  resolvedOutcome: patch.resolvedOutcome ?? item.resolvedOutcome,
+                  resolvedAt: patch.resolvedAt ?? item.resolvedAt,
+                }
+              : item
+          )),
+          plays: prev.plays.map((item) => (
+            item.pmMarketId === patch.pmMarketId
+              ? {
+                  ...item,
+                  status: "RESOLVED",
+                  resolvedOutcome: patch.resolvedOutcome ?? item.resolvedOutcome,
+                  resolvedAt: patch.resolvedAt ?? item.resolvedAt,
+                }
+              : item
+          )),
+        };
+      });
+      return;
+    }
+    if (type === "polymarket-refresh" || type === "polymarket_refresh") {
+      const reason = payload?.reason ?? payload?.data?.reason ?? "";
+      if (reason === "subscribe") {
+        return;
+      }
+      if (reason.startsWith("price") || reason === "result") {
+        return;
+      }
+      // 其他刷新信号先忽略，避免整页重拉；如果后续需要可在这里补局部 patch。
+      return;
+    }
+  }, []);
 
   useEffect(() => {
     loadAll();
@@ -250,7 +361,7 @@ function PolymarketApp({ baseUrl }) {
   usePolymarketSocket({
     baseUrl,
     enabled: true,
-    onRefresh: scheduleLiveRefresh,
+    onRefresh: applySocketPatch,
     onConnectedChange: setSocketConnected,
   });
 

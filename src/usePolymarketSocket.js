@@ -80,8 +80,8 @@ export function usePolymarketSocket({ baseUrl, enabled, onRefresh, onConnectedCh
         const msg = JSON.parse(ev.data);
         const type = msg && msg.type;
         if (type === "sub_ack") return;
-        if (type === POLYMARKET_REFRESH_TOPIC && typeof onRefreshRef.current === "function") {
-          onRefreshRef.current(msg.data ?? msg);
+        if ((type === POLYMARKET_REFRESH_TOPIC || type === "polymarket_refresh" || type === "polymarket-price" || type === "polymarket-result") && typeof onRefreshRef.current === "function") {
+          onRefreshRef.current(msg);
         }
       } catch (err) {
         console.warn("[usePolymarketSocket] 解析消息失败:", err);
