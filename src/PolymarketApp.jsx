@@ -306,7 +306,7 @@ function PolymarketApp({ baseUrl }) {
             只看事件、市场、玩法、结果和价格，不复用现有球盘组件树。
           </div>
           <div className="polymarket-hero-desc" style={{ marginTop: 10, opacity: 0.9 }}>
-            实时通道：{socketConnected ? "WS 已连接" : "WS 未连接"}，价格变化会自动刷新。
+            实时通道：{socketConnected ? "原生 WS 已连接" : "原生 WS 未连接"}，价格变化会自动刷新。
           </div>
         </div>
         <div className="polymarket-actions">
