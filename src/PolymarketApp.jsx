@@ -137,6 +137,14 @@ function parseAssetIds(item) {
   return [];
 }
 
+function parseTokenIds(item) {
+  const raw = parseMaybeJson(item?.tokenIdsJson ?? item?.token_ids_json ?? item?.tokenIds ?? item?.token_ids);
+  if (Array.isArray(raw)) {
+    return raw.map((value) => String(value)).filter(Boolean);
+  }
+  return [];
+}
+
 function PolymarketApp({ baseUrl }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -520,6 +528,9 @@ function PolymarketApp({ baseUrl }) {
                       <div>
                         <h3 className="polymarket-card-title">{displayName}</h3>
                         <div className="polymarket-card-subtitle">
+                          token ids：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
+                        </div>
+                        <div className="polymarket-card-subtitle">
                           asset ids：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · 结果：{item.resolvedOutcome || "-"}
                         </div>
                       </div>
@@ -576,6 +587,9 @@ function PolymarketApp({ baseUrl }) {
                       <div>
                         <h3 className="polymarket-card-title">{item.question || item.description || item.pmMarketId || "Polymarket 市场"}</h3>
                         <div className="polymarket-card-subtitle">
+                          token ids：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
+                        </div>
+                        <div className="polymarket-card-subtitle">
                           asset ids：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · condition：{item.conditionId || "-"}
                         </div>
                       </div>
@@ -622,6 +636,9 @@ function PolymarketApp({ baseUrl }) {
                     <div className="polymarket-card-head">
                       <div>
                         <h3 className="polymarket-card-title">{item.pmMarketId || item.marketId || "Polymarket 结果"}</h3>
+                        <div className="polymarket-card-subtitle">
+                          token ids：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
+                        </div>
                         <div className="polymarket-card-subtitle">
                           asset ids：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · resolvedAt：{item.resolvedAt || "-"} · source：{item.resolutionSource || "-"}
                         </div>
