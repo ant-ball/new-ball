@@ -35,10 +35,35 @@ function formatPrice(value) {
   return num.toFixed(4).replace(/\.?0+$/, "");
 }
 
+function formatProbability(value) {
+  if (value == null || value === "") return "—";
+  const num = Number(value);
+  if (Number.isNaN(num)) return "—";
+  const percent = num <= 1 ? num * 100 : num;
+  return `${percent.toFixed(percent % 1 === 0 ? 0 : 1)}%`;
+}
+
 function clampPercent(value) {
   const num = Number(value);
   if (Number.isNaN(num)) return 0;
   return Math.max(0, Math.min(100, Math.round(num * 100)));
+}
+
+function extractOutcomePrice(item, idx) {
+  const latestPrices = Array.isArray(item?.latestPrices) ? item.latestPrices : [];
+  const priceRow = latestPrices.find((row) => Number(row.outcomeIndex) === Number(idx));
+  if (priceRow) {
+    return priceRow.price ?? priceRow.bestAsk ?? priceRow.bestBid;
+  }
+  const rawOutcomePrices = parseMaybeJson(item?.outcomePricesJson);
+  if (Array.isArray(rawOutcomePrices) && rawOutcomePrices.length > idx) {
+    const candidate = rawOutcomePrices[idx];
+    if (candidate && typeof candidate === "object") {
+      return candidate.price ?? candidate.value ?? candidate.probability ?? candidate.odds ?? candidate.ask ?? candidate.bid;
+    }
+    return candidate;
+  }
+  return null;
 }
 
 function deriveDisplayCards(plays, markets) {
@@ -246,7 +271,6 @@ function PolymarketApp({ baseUrl }) {
           <section className="polymarket-grid">
             {currentList.map((item, index) => {
               if (activeTab === "plays") {
-                const latestPrices = Array.isArray(item.latestPrices) ? item.latestPrices : [];
                 const outcomeNames = parseMaybeJson(item.outcomesJson);
                 const displayName = item.__kind === "market" ? "市场玩法" : item.title || item.question || item.pmPlayId || "Polymarket 玩法";
                 const outcomeList = Array.isArray(outcomeNames) && outcomeNames.length > 0
@@ -274,13 +298,17 @@ function PolymarketApp({ baseUrl }) {
                     </div>
                     <div className="pm-options">
                       {outcomeList.map((name, idx) => {
-                        const priceRow = latestPrices.find((row) => Number(row.outcomeIndex) === Number(idx));
-                        const price = priceRow?.price ?? priceRow?.bestAsk ?? priceRow?.bestBid;
+                        const price = extractOutcomePrice(item, idx);
                         const optionName = typeof name === "object" ? (name?.name || name?.label || name?.outcome || `选项${idx + 1}`) : String(name);
                         return (
                           <div className="pm-option" key={`${optionName}-${idx}`}>
                             <div className="pm-option-name">{optionName}</div>
-                            <div className="pm-option-price">{formatPrice(price)}</div>
+                            <div className="pm-option-price">
+                              <div>{formatPrice(price)}</div>
+                              <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                                概率 {formatProbability(price)}
+                              </div>
+                            </div>
                             <div style={{ marginTop: 10, height: 8, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}>
                               <div
                                 style={{
@@ -328,7 +356,12 @@ function PolymarketApp({ baseUrl }) {
                         return (
                           <div className="pm-option" key={`${item.pmMarketId}-${name}-${idx}`}>
                             <div className="pm-option-name">{String(name)}</div>
-                            <div className="pm-option-price">{formatPrice(price)}</div>
+                            <div className="pm-option-price">
+                              <div>{formatPrice(price)}</div>
+                              <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                                概率 {formatProbability(price)}
+                              </div>
+                            </div>
                             <div style={{ marginTop: 10, height: 8, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}>
                               <div
                                 style={{
