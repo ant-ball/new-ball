@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  fetchPolymarketCategories,
   fetchPolymarketEvents,
   fetchPolymarketMarkets,
   fetchPolymarketPlays,
@@ -188,12 +189,15 @@ function PolymarketApp({ baseUrl }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("markets");
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState("");
   const [error, setError] = useState("");
   const [playSyncing, setPlaySyncing] = useState(false);
   const [playSyncTries, setPlaySyncTries] = useState(0);
   const [socketConnected, setSocketConnected] = useState(false);
   const reloadTimerRef = useRef(null);
   const [data, setData] = useState({
+    categories: [],
     events: [],
     markets: [],
     plays: [],
@@ -205,14 +209,27 @@ function PolymarketApp({ baseUrl }) {
     setLoading(true);
     setError("");
     try {
+      const categoriesRes = await fetchPolymarketCategories(baseUrl);
+      const categoryRows = Array.isArray(categoriesRes.data) ? categoriesRes.data : [];
+      const enabledCategories = categoryRows
+        .filter((item) => item && item.category)
+        .map((item) => item.category);
+      const resolvedCategory = enabledCategories.includes(selectedCategory)
+        ? selectedCategory
+        : (enabledCategories[0] || "");
+      if (resolvedCategory !== selectedCategory) {
+        setSelectedCategory(resolvedCategory);
+      }
+      setCategories(categoryRows);
       const [eventsRes, marketsRes, playsRes, pricesRes, resultsRes] = await Promise.all([
-        fetchPolymarketEvents(baseUrl),
-        fetchPolymarketMarkets(baseUrl),
+        fetchPolymarketEvents(baseUrl, resolvedCategory),
+        fetchPolymarketMarkets(baseUrl, null, resolvedCategory),
         fetchPolymarketPlays(baseUrl),
         fetchPolymarketPrices(baseUrl),
         fetchPolymarketResults(baseUrl),
       ]);
       setData({
+        categories: categoryRows,
         events: Array.isArray(eventsRes.data) ? eventsRes.data : [],
         markets: Array.isArray(marketsRes.data) ? marketsRes.data : [],
         plays: Array.isArray(playsRes.data) ? playsRes.data : [],
@@ -229,8 +246,9 @@ function PolymarketApp({ baseUrl }) {
   const loadLive = useCallback(async () => {
     setError("");
     try {
+      const currentCategory = selectedCategory;
       const [marketsRes, playsRes, pricesRes, resultsRes] = await Promise.all([
-        fetchPolymarketMarkets(baseUrl),
+        fetchPolymarketMarkets(baseUrl, null, currentCategory),
         fetchPolymarketPlays(baseUrl),
         fetchPolymarketPrices(baseUrl),
         fetchPolymarketResults(baseUrl),
@@ -245,7 +263,7 @@ function PolymarketApp({ baseUrl }) {
     } catch (err) {
       setError(err?.message || "Polymarket 刷新失败");
     }
-  }, [baseUrl]);
+  }, [baseUrl, selectedCategory]);
 
   const applySocketPatch = useCallback((message) => {
     if (!message || typeof message !== "object") {
@@ -365,23 +383,42 @@ function PolymarketApp({ baseUrl }) {
     onConnectedChange: setSocketConnected,
   });
 
+  const visibleEventIds = useMemo(() => new Set((Array.isArray(data.events) ? data.events : []).map((item) => item.pmEventId).filter(Boolean)), [data.events]);
+
+  const filteredPlays = useMemo(() => {
+    const plays = Array.isArray(data.plays) ? data.plays : [];
+    if (!visibleEventIds.size) {
+      return [];
+    }
+    return plays.filter((item) => item && item.pmEventId && visibleEventIds.has(item.pmEventId));
+  }, [data.plays, visibleEventIds]);
+
+  const filteredResults = useMemo(() => {
+    const marketIds = new Set((Array.isArray(data.markets) ? data.markets : []).map((item) => item.pmMarketId).filter(Boolean));
+    const results = Array.isArray(data.results) ? data.results : [];
+    if (!marketIds.size) {
+      return [];
+    }
+    return results.filter((item) => item && item.pmMarketId && marketIds.has(item.pmMarketId));
+  }, [data.markets, data.results]);
+
   const summary = useMemo(() => ([
+    { label: "分类", value: categories.length },
     { label: "事件", value: data.events.length },
     { label: "市场", value: data.markets.length },
-    { label: "玩法", value: data.plays.length },
-    { label: "结果", value: data.results.length },
-  ]), [data.events.length, data.markets.length, data.plays.length, data.results.length]);
+    { label: "玩法", value: filteredPlays.length },
+  ]), [categories.length, data.events.length, data.markets.length, filteredPlays.length]);
 
   const currentList = useMemo(() => {
     if (activeTab === "events") return data.events;
     if (activeTab === "markets") return data.markets;
-    if (activeTab === "results") return data.results;
-    return deriveDisplayCards(data.plays, data.markets);
-  }, [activeTab, data.events, data.markets, data.plays, data.results]);
+    if (activeTab === "results") return filteredResults;
+    return deriveDisplayCards(filteredPlays, data.markets);
+  }, [activeTab, data.events, data.markets, filteredPlays, filteredResults]);
 
   useEffect(() => {
     if (!loading) {
-      if (data.plays.length > 0) {
+      if (filteredPlays.length > 0) {
         setActiveTab("plays");
       } else if (data.markets.length > 0) {
         setActiveTab("plays");
@@ -389,7 +426,14 @@ function PolymarketApp({ baseUrl }) {
         setActiveTab("events");
       }
     }
-  }, [loading, data.plays.length, data.markets.length, data.events.length]);
+  }, [loading, filteredPlays.length, data.markets.length, data.events.length]);
+
+  useEffect(() => {
+    if (!selectedCategory) {
+      return;
+    }
+    loadAll();
+  }, [selectedCategory, loadAll]);
 
   const handleSync = useCallback(async (type) => {
     setRefreshing(true);
@@ -462,6 +506,26 @@ function PolymarketApp({ baseUrl }) {
         ))}
       </section>
 
+      <section className="polymarket-tabs" role="tablist" aria-label="Polymarket category tabs">
+        {categories.map((item) => {
+          const category = item?.category || "";
+          return (
+            <button
+              key={category}
+              type="button"
+              className={selectedCategory === category ? "polymarket-tab active" : "polymarket-tab"}
+              onClick={() => {
+                if (category && category !== selectedCategory) {
+                  setSelectedCategory(category);
+                }
+              }}
+            >
+              {category}
+            </button>
+          );
+        })}
+      </section>
+
       <section className="polymarket-tabs" role="tablist" aria-label="Polymarket tabs">
         {TABS.map((tab) => (
           <button
@@ -476,14 +540,17 @@ function PolymarketApp({ baseUrl }) {
       </section>
 
       {error ? <div className="pm-empty" style={{ color: "#dc2626" }}>{error}</div> : null}
-      {!error && !loading && data.plays.length === 0 && data.markets.length > 0 ? (
+      {!error && !loading && !selectedCategory ? (
+        <div className="pm-empty">当前没有已开启的分类，请先在管理后台开启 category。</div>
+      ) : null}
+      {!error && !loading && filteredPlays.length === 0 && data.markets.length > 0 ? (
         <div className="pm-empty">
           玩法表暂时还没同步出来，当前用市场数据直接展示赔率。你可以先看市场卡片里的选项和价格。
         </div>
       ) : null}
       {loading ? <div className="pm-empty">正在加载 Polymarket 数据...</div> : null}
 
-      {!loading && !error ? (
+      {!loading && !error && selectedCategory ? (
         currentList.length ? (
           <section className="polymarket-grid">
             {currentList.map((item, index) => {

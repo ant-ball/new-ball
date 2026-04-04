@@ -30,13 +30,19 @@ function unwrapData(json) {
   return json;
 }
 
-export async function fetchPolymarketEvents(baseUrl) {
-  const { url, json } = await requestJson(baseUrl, "/polymarket/events?offset=0&limit=100");
+export async function fetchPolymarketCategories(baseUrl) {
+  const { url, json } = await requestJson(baseUrl, "/polymarket/categories");
   return { url, data: unwrapData(json) || [] };
 }
 
-export async function fetchPolymarketMarkets(baseUrl, pmEventId) {
-  const suffix = pmEventId ? `&pmEventId=${encodeURIComponent(pmEventId)}` : "";
+export async function fetchPolymarketEvents(baseUrl, category) {
+  const suffix = category ? `&category=${encodeURIComponent(category)}` : "";
+  const { url, json } = await requestJson(baseUrl, `/polymarket/events?offset=0&limit=100${suffix}`);
+  return { url, data: unwrapData(json) || [] };
+}
+
+export async function fetchPolymarketMarkets(baseUrl, pmEventId, category) {
+  const suffix = `${pmEventId ? `&pmEventId=${encodeURIComponent(pmEventId)}` : ""}${category ? `&category=${encodeURIComponent(category)}` : ""}`;
   const { url, json } = await requestJson(baseUrl, `/polymarket/markets?offset=0&limit=100${suffix}`);
   return { url, data: unwrapData(json) || [] };
 }
