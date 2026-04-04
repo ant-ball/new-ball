@@ -512,7 +512,7 @@ function PolymarketApp({ baseUrl }) {
                       <div>
                         <h3 className="polymarket-card-title">{displayName}</h3>
                         <div className="polymarket-card-subtitle">
-                          市场：{item.pmMarketId || "-"} · 事件：{item.pmEventId || "-"} · 结果：{item.resolvedOutcome || "-"}
+                          market id：{item.pmMarketId || "-"} · event id：{item.pmEventId || "-"} · 结果：{item.resolvedOutcome || "-"}
                         </div>
                       </div>
                       <div className={item.status === "RESOLVED" ? "polymarket-pill green" : "polymarket-pill"}>
@@ -568,7 +568,7 @@ function PolymarketApp({ baseUrl }) {
                       <div>
                         <h3 className="polymarket-card-title">{item.question || item.description || item.pmMarketId || "Polymarket 市场"}</h3>
                         <div className="polymarket-card-subtitle">
-                          event：{item.pmEventId || "-"} · condition：{item.conditionId || "-"}
+                          market id：{item.pmMarketId || "-"} · event id：{item.pmEventId || "-"} · condition：{item.conditionId || "-"}
                         </div>
                       </div>
                       <div className={item.status === "RESOLVED" ? "polymarket-pill green" : "polymarket-pill"}>
@@ -615,7 +615,7 @@ function PolymarketApp({ baseUrl }) {
                       <div>
                         <h3 className="polymarket-card-title">{item.pmMarketId || item.marketId || "Polymarket 结果"}</h3>
                         <div className="polymarket-card-subtitle">
-                          resolvedAt：{item.resolvedAt || "-"} · source：{item.resolutionSource || "-"}
+                          market id：{item.pmMarketId || item.marketId || "-"} · resolvedAt：{item.resolvedAt || "-"} · source：{item.resolutionSource || "-"}
                         </div>
                       </div>
                       <div className="polymarket-pill green">{item.resolvedOutcome || "RESOLVED"}</div>
