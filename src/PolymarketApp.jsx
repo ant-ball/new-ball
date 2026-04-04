@@ -129,6 +129,14 @@ function buildLatestPrices(prices, pmMarketId) {
   return prices.filter((row) => row && row.pmMarketId === pmMarketId);
 }
 
+function parseAssetIds(item) {
+  const raw = parseMaybeJson(item?.assetIdsJson ?? item?.asset_ids_json ?? item?.assetIds ?? item?.asset_ids);
+  if (Array.isArray(raw)) {
+    return raw.map((value) => String(value)).filter(Boolean);
+  }
+  return [];
+}
+
 function PolymarketApp({ baseUrl }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -512,7 +520,7 @@ function PolymarketApp({ baseUrl }) {
                       <div>
                         <h3 className="polymarket-card-title">{displayName}</h3>
                         <div className="polymarket-card-subtitle">
-                          market id：{item.pmMarketId || "-"} · event id：{item.pmEventId || "-"} · 结果：{item.resolvedOutcome || "-"}
+                          asset ids：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · 结果：{item.resolvedOutcome || "-"}
                         </div>
                       </div>
                       <div className={item.status === "RESOLVED" ? "polymarket-pill green" : "polymarket-pill"}>
@@ -568,7 +576,7 @@ function PolymarketApp({ baseUrl }) {
                       <div>
                         <h3 className="polymarket-card-title">{item.question || item.description || item.pmMarketId || "Polymarket 市场"}</h3>
                         <div className="polymarket-card-subtitle">
-                          market id：{item.pmMarketId || "-"} · event id：{item.pmEventId || "-"} · condition：{item.conditionId || "-"}
+                          asset ids：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · condition：{item.conditionId || "-"}
                         </div>
                       </div>
                       <div className={item.status === "RESOLVED" ? "polymarket-pill green" : "polymarket-pill"}>
@@ -615,7 +623,7 @@ function PolymarketApp({ baseUrl }) {
                       <div>
                         <h3 className="polymarket-card-title">{item.pmMarketId || item.marketId || "Polymarket 结果"}</h3>
                         <div className="polymarket-card-subtitle">
-                          market id：{item.pmMarketId || item.marketId || "-"} · resolvedAt：{item.resolvedAt || "-"} · source：{item.resolutionSource || "-"}
+                          asset ids：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · resolvedAt：{item.resolvedAt || "-"} · source：{item.resolutionSource || "-"}
                         </div>
                       </div>
                       <div className="polymarket-pill green">{item.resolvedOutcome || "RESOLVED"}</div>
