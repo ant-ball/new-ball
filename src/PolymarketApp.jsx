@@ -202,18 +202,22 @@ function PolymarketApp({ baseUrl }) {
     results: [],
   });
 
-  const loadHierarchy = useCallback(async ({ category = "", eventId = "", resetSelection = false } = {}) => {
+  const loadCategories = useCallback(async () => {
+    const categoriesRes = await fetchPolymarketCategories(baseUrl);
+    return Array.isArray(categoriesRes.data) ? categoriesRes.data : [];
+  }, [baseUrl]);
+
+  const loadCategoryPath = useCallback(async ({ category = "", eventId = "" } = {}) => {
     setLoading(true);
     setError("");
     try {
-      const categoriesRes = await fetchPolymarketCategories(baseUrl);
-      const categoryRows = Array.isArray(categoriesRes.data) ? categoriesRes.data : [];
-      const resolvedCategory = pickInitialCategory(categoryRows, resetSelection ? "" : category);
+      const categoryRows = categories.length > 0 ? categories : await loadCategories();
+      const resolvedCategory = category || pickInitialCategory(categoryRows, "");
       const eventsRes = resolvedCategory
         ? await fetchPolymarketEvents(baseUrl, resolvedCategory, PAGE_SIZE, 0)
         : { data: [] };
       const eventRows = Array.isArray(eventsRes.data) ? eventsRes.data : [];
-      const resolvedEventId = pickInitialEventId(eventRows, resetSelection ? "" : eventId);
+      const resolvedEventId = eventId || pickInitialEventId(eventRows, "");
       let markets = [];
       let plays = [];
       if (resolvedEventId) {
@@ -224,24 +228,27 @@ function PolymarketApp({ baseUrl }) {
         markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
         plays = Array.isArray(playsRes.data) ? playsRes.data : [];
       }
-      setCategories(categoryRows);
       setSelectedCategory(resolvedCategory);
       setSelectedEventId(resolvedEventId);
       setSelectedMarketId(markets.find((item) => item && item.pmMarketId)?.pmMarketId || "");
-      setData({
+      setData((prev) => ({
+        ...prev,
         categories: categoryRows,
         events: eventRows,
         markets: attachLatestPricesToMarkets(markets, plays),
         plays,
         prices: [],
         results: [],
-      });
+      }));
+      if (categories.length === 0) {
+        setCategories(categoryRows);
+      }
     } catch (err) {
       setError(err?.message || "Polymarket 加载失败");
     } finally {
       setLoading(false);
     }
-  }, [baseUrl]);
+  }, [baseUrl, categories, loadCategories]);
 
   const loadSelectedEvent = useCallback(async (nextEventId, nextCategory = selectedCategory) => {
     if (!nextEventId) {
@@ -341,8 +348,57 @@ function PolymarketApp({ baseUrl }) {
   }, []);
 
   useEffect(() => {
-    loadHierarchy({ resetSelection: true });
-  }, [loadHierarchy]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const categoryRows = await loadCategories();
+        if (cancelled) return;
+        setCategories(categoryRows);
+        const initialCategory = pickInitialCategory(categoryRows, "");
+        if (!initialCategory) {
+          setLoading(false);
+          return;
+        }
+        const eventsRes = await fetchPolymarketEvents(baseUrl, initialCategory, PAGE_SIZE, 0);
+        if (cancelled) return;
+        const eventRows = Array.isArray(eventsRes.data) ? eventsRes.data : [];
+        const initialEventId = pickInitialEventId(eventRows, "");
+        let markets = [];
+        let plays = [];
+        if (initialEventId) {
+          const [marketsRes, playsRes] = await Promise.all([
+            fetchPolymarketMarkets(baseUrl, initialEventId, initialCategory, PAGE_SIZE, 0),
+            fetchPolymarketPlays(baseUrl, initialEventId, PAGE_SIZE, 0),
+          ]);
+          markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
+          plays = Array.isArray(playsRes.data) ? playsRes.data : [];
+        }
+        if (cancelled) return;
+        setSelectedCategory(initialCategory);
+        setSelectedEventId(initialEventId);
+        setSelectedMarketId(markets.find((item) => item && item.pmMarketId)?.pmMarketId || "");
+        setData({
+          categories: categoryRows,
+          events: eventRows,
+          markets: attachLatestPricesToMarkets(markets, plays),
+          plays,
+          prices: [],
+          results: [],
+        });
+      } catch (err) {
+        if (!cancelled) {
+          setError(err?.message || "Polymarket 加载失败");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, loadCategories]);
 
   usePolymarketSocket({
     baseUrl,
@@ -395,20 +451,22 @@ function PolymarketApp({ baseUrl }) {
       } else {
         await syncPolymarketPlays(baseUrl);
       }
-      await loadHierarchy({ category: selectedCategory, eventId: selectedEventId });
+      if (selectedCategory) {
+        await loadCategoryPath({ category: selectedCategory, eventId: selectedEventId });
+      }
     } catch (err) {
       setError(err?.message || "同步失败");
     } finally {
       setRefreshing(false);
     }
-  }, [baseUrl, loadHierarchy, selectedCategory, selectedEventId]);
+  }, [baseUrl, loadCategoryPath, selectedCategory, selectedEventId]);
 
   const handleCategoryClick = useCallback((category) => {
     if (!category || category === selectedCategory) {
       return;
     }
-    loadHierarchy({ category, resetSelection: true });
-  }, [loadHierarchy, selectedCategory]);
+    loadCategoryPath({ category });
+  }, [loadCategoryPath, selectedCategory]);
 
   const handleEventClick = useCallback((eventId) => {
     if (!eventId || eventId === selectedEventId) {
@@ -444,7 +502,7 @@ function PolymarketApp({ baseUrl }) {
           <button type="button" className="polymarket-action-btn secondary" onClick={() => handleSync("plays")} disabled={refreshing}>
             同步玩法
           </button>
-          <button type="button" className="polymarket-action-btn primary" onClick={() => loadHierarchy({ category: selectedCategory, eventId: selectedEventId })} disabled={loading || refreshing}>
+          <button type="button" className="polymarket-action-btn primary" onClick={() => loadCategoryPath({ category: selectedCategory, eventId: selectedEventId })} disabled={loading || refreshing}>
             {loading || refreshing ? "刷新中..." : "刷新"}
           </button>
         </div>
