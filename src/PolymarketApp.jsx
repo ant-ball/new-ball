@@ -400,12 +400,19 @@ function PolymarketApp({ baseUrl }) {
     };
   }, [baseUrl, loadCategories]);
 
-  usePolymarketSocket({
+  const { connected: wsConnected, subscribeEvent } = usePolymarketSocket({
     baseUrl,
     enabled: true,
     onRefresh: applySocketPatch,
     onConnectedChange: setSocketConnected,
   });
+
+  // 当选中 event 变化时，订阅该 event 的价格推送
+  useEffect(() => {
+    if (selectedEventId && wsConnected) {
+      subscribeEvent(selectedEventId);
+    }
+  }, [selectedEventId, wsConnected, subscribeEvent]);
 
   const selectedEvent = useMemo(() => (
     (Array.isArray(data.events) ? data.events : []).find((item) => item && item.pmEventId === selectedEventId) || null
