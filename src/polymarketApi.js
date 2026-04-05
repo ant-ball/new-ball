@@ -35,31 +35,31 @@ export async function fetchPolymarketCategories(baseUrl) {
   return { url, data: unwrapData(json) || [] };
 }
 
-export async function fetchPolymarketEvents(baseUrl, category) {
+export async function fetchPolymarketEvents(baseUrl, category, limit = 20, offset = 0) {
   const suffix = category ? `&category=${encodeURIComponent(category)}` : "";
-  const { url, json } = await requestJson(baseUrl, `/polymarket/events?offset=0&limit=100${suffix}`);
+  const { url, json } = await requestJson(baseUrl, `/polymarket/events?offset=${offset}&limit=${limit}${suffix}`);
   return { url, data: unwrapData(json) || [] };
 }
 
-export async function fetchPolymarketMarkets(baseUrl, pmEventId, category) {
+export async function fetchPolymarketMarkets(baseUrl, pmEventId, category, limit = 20, offset = 0) {
   const suffix = `${pmEventId ? `&pmEventId=${encodeURIComponent(pmEventId)}` : ""}${category ? `&category=${encodeURIComponent(category)}` : ""}`;
-  const { url, json } = await requestJson(baseUrl, `/polymarket/markets?offset=0&limit=100${suffix}`);
+  const { url, json } = await requestJson(baseUrl, `/polymarket/markets?offset=${offset}&limit=${limit}${suffix}`);
   return { url, data: unwrapData(json) || [] };
 }
 
-export async function fetchPolymarketPlays(baseUrl, pmEventId) {
+export async function fetchPolymarketPlays(baseUrl, pmEventId, limit = 20, offset = 0) {
   const suffix = pmEventId ? `&pmEventId=${encodeURIComponent(pmEventId)}` : "";
-  const { url, json } = await requestJson(baseUrl, `/polymarket/plays?offset=0&limit=100${suffix}`);
+  const { url, json } = await requestJson(baseUrl, `/polymarket/plays?offset=${offset}&limit=${limit}${suffix}`);
   return { url, data: unwrapData(json) || [] };
 }
 
-export async function fetchPolymarketPrices(baseUrl) {
-  const { url, json } = await requestJson(baseUrl, "/polymarket/prices?offset=0&limit=100");
+export async function fetchPolymarketPrices(baseUrl, offset = 0, limit = 20) {
+  const { url, json } = await requestJson(baseUrl, `/polymarket/prices?offset=${offset}&limit=${limit}`);
   return { url, data: unwrapData(json) || [] };
 }
 
-export async function fetchPolymarketResults(baseUrl) {
-  const { url, json } = await requestJson(baseUrl, "/polymarket/results?offset=0&limit=100");
+export async function fetchPolymarketResults(baseUrl, offset = 0, limit = 20) {
+  const { url, json } = await requestJson(baseUrl, `/polymarket/results?offset=${offset}&limit=${limit}`);
   return { url, data: unwrapData(json) || [] };
 }
 

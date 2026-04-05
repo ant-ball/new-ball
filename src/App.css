@@ -218,6 +218,45 @@
   flex-wrap: wrap;
 }
 
+.polymarket-event-rail {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.polymarket-event-chip {
+  flex: 0 0 240px;
+  text-align: left;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.82);
+  color: #334155;
+  border-radius: 16px;
+  padding: 12px 14px;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+}
+
+.polymarket-event-chip.active {
+  background: linear-gradient(135deg, rgba(17, 24, 39, 0.98) 0%, rgba(37, 99, 235, 0.98) 100%);
+  color: #fff;
+  border-color: transparent;
+}
+
+.polymarket-event-chip-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.polymarket-event-chip-meta {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
 .polymarket-tab {
   border: 1px solid rgba(148, 163, 184, 0.24);
   background: rgba(255, 255, 255, 0.82);
@@ -245,6 +284,12 @@
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.polymarket-card.selected {
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.10);
+  outline: 2px solid rgba(37, 99, 235, 0.14);
 }
 
 .polymarket-card-head {

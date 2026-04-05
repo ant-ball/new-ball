@@ -1,21 +1,19 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchPolymarketCategories,
   fetchPolymarketEvents,
   fetchPolymarketMarkets,
   fetchPolymarketPlays,
-  fetchPolymarketPrices,
-  fetchPolymarketResults,
   syncPolymarketEvents,
   syncPolymarketMarkets,
   syncPolymarketPlays,
 } from "./polymarketApi";
 import { usePolymarketSocket } from "./usePolymarketSocket";
 
+const PAGE_SIZE = 20;
 const TABS = [
   { key: "plays", label: "玩法" },
   { key: "markets", label: "市场" },
-  { key: "events", label: "事件" },
   { key: "results", label: "结果" },
 ];
 
@@ -129,6 +127,46 @@ function buildLatestPrices(prices, pmMarketId) {
   return prices.filter((row) => row && row.pmMarketId === pmMarketId);
 }
 
+function pickInitialCategory(categoryRows, requestedCategory = "") {
+  const enabledCategories = (Array.isArray(categoryRows) ? categoryRows : [])
+    .filter((item) => item && item.category)
+    .map((item) => item.category);
+  if (requestedCategory && enabledCategories.includes(requestedCategory)) {
+    return requestedCategory;
+  }
+  return enabledCategories[0] || "";
+}
+
+function pickInitialEventId(eventRows, preferredEventId = "") {
+  const list = Array.isArray(eventRows) ? eventRows : [];
+  if (preferredEventId && list.some((item) => item && item.pmEventId === preferredEventId)) {
+    return preferredEventId;
+  }
+  return list.length > 0 ? (list[0]?.pmEventId || "") : "";
+}
+
+function attachLatestPricesToMarkets(markets, plays) {
+  if (!Array.isArray(markets) || markets.length === 0) {
+    return [];
+  }
+  const priceMap = new Map();
+  (Array.isArray(plays) ? plays : []).forEach((play) => {
+    if (!play || !play.pmMarketId || !Array.isArray(play.latestPrices)) {
+      return;
+    }
+    if (!priceMap.has(play.pmMarketId)) {
+      priceMap.set(play.pmMarketId, play.latestPrices);
+    }
+  });
+  return markets.map((market) => {
+    if (!market || !market.pmMarketId) {
+      return market;
+    }
+    const latestPrices = priceMap.get(market.pmMarketId);
+    return latestPrices ? { ...market, latestPrices } : market;
+  });
+}
+
 function parseAssetIds(item) {
   const raw = parseMaybeJson(item?.assetIdsJson ?? item?.asset_ids_json ?? item?.assetIds ?? item?.asset_ids);
   if (Array.isArray(raw)) {
@@ -151,11 +189,10 @@ function PolymarketApp({ baseUrl }) {
   const [activeTab, setActiveTab] = useState("markets");
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedEventId, setSelectedEventId] = useState("");
+  const [selectedMarketId, setSelectedMarketId] = useState("");
   const [error, setError] = useState("");
-  const [playSyncing, setPlaySyncing] = useState(false);
-  const [playSyncTries, setPlaySyncTries] = useState(0);
   const [socketConnected, setSocketConnected] = useState(false);
-  const reloadTimerRef = useRef(null);
   const [data, setData] = useState({
     categories: [],
     events: [],
@@ -165,35 +202,39 @@ function PolymarketApp({ baseUrl }) {
     results: [],
   });
 
-  const loadAll = useCallback(async ({ category = "", resetCategory = false } = {}) => {
+  const loadHierarchy = useCallback(async ({ category = "", eventId = "", resetSelection = false } = {}) => {
     setLoading(true);
     setError("");
     try {
       const categoriesRes = await fetchPolymarketCategories(baseUrl);
       const categoryRows = Array.isArray(categoriesRes.data) ? categoriesRes.data : [];
-      const enabledCategories = categoryRows
-        .filter((item) => item && item.category)
-        .map((item) => item.category);
-      const requestedCategory = category || "";
-      const resolvedCategory = resetCategory
-        ? (enabledCategories[0] || "")
-        : (enabledCategories.includes(requestedCategory) ? requestedCategory : (enabledCategories[0] || ""));
-      setSelectedCategory((prev) => (prev === resolvedCategory ? prev : resolvedCategory));
+      const resolvedCategory = pickInitialCategory(categoryRows, resetSelection ? "" : category);
+      const eventsRes = resolvedCategory
+        ? await fetchPolymarketEvents(baseUrl, resolvedCategory, PAGE_SIZE, 0)
+        : { data: [] };
+      const eventRows = Array.isArray(eventsRes.data) ? eventsRes.data : [];
+      const resolvedEventId = pickInitialEventId(eventRows, resetSelection ? "" : eventId);
+      let markets = [];
+      let plays = [];
+      if (resolvedEventId) {
+        const [marketsRes, playsRes] = await Promise.all([
+          fetchPolymarketMarkets(baseUrl, resolvedEventId, resolvedCategory, PAGE_SIZE, 0),
+          fetchPolymarketPlays(baseUrl, resolvedEventId, PAGE_SIZE, 0),
+        ]);
+        markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
+        plays = Array.isArray(playsRes.data) ? playsRes.data : [];
+      }
       setCategories(categoryRows);
-      const [eventsRes, marketsRes, playsRes, pricesRes, resultsRes] = await Promise.all([
-        fetchPolymarketEvents(baseUrl, resolvedCategory),
-        fetchPolymarketMarkets(baseUrl, null, resolvedCategory),
-        fetchPolymarketPlays(baseUrl),
-        fetchPolymarketPrices(baseUrl),
-        fetchPolymarketResults(baseUrl),
-      ]);
+      setSelectedCategory(resolvedCategory);
+      setSelectedEventId(resolvedEventId);
+      setSelectedMarketId(markets.find((item) => item && item.pmMarketId)?.pmMarketId || "");
       setData({
         categories: categoryRows,
-        events: Array.isArray(eventsRes.data) ? eventsRes.data : [],
-        markets: Array.isArray(marketsRes.data) ? marketsRes.data : [],
-        plays: Array.isArray(playsRes.data) ? playsRes.data : [],
-        prices: Array.isArray(pricesRes.data) ? pricesRes.data : [],
-        results: Array.isArray(resultsRes.data) ? resultsRes.data : [],
+        events: eventRows,
+        markets: attachLatestPricesToMarkets(markets, plays),
+        plays,
+        prices: [],
+        results: [],
       });
     } catch (err) {
       setError(err?.message || "Polymarket 加载失败");
@@ -202,25 +243,41 @@ function PolymarketApp({ baseUrl }) {
     }
   }, [baseUrl]);
 
-  const loadLive = useCallback(async () => {
-    setError("");
-    try {
-      const currentCategory = selectedCategory;
-      const [marketsRes, playsRes, pricesRes, resultsRes] = await Promise.all([
-        fetchPolymarketMarkets(baseUrl, null, currentCategory),
-        fetchPolymarketPlays(baseUrl),
-        fetchPolymarketPrices(baseUrl),
-        fetchPolymarketResults(baseUrl),
-      ]);
+  const loadSelectedEvent = useCallback(async (nextEventId, nextCategory = selectedCategory) => {
+    if (!nextEventId) {
+      setSelectedEventId("");
+      setSelectedMarketId("");
       setData((prev) => ({
         ...prev,
-        markets: Array.isArray(marketsRes.data) ? marketsRes.data : [],
-        plays: Array.isArray(playsRes.data) ? playsRes.data : [],
-        prices: Array.isArray(pricesRes.data) ? pricesRes.data : [],
-        results: Array.isArray(resultsRes.data) ? resultsRes.data : [],
+        markets: [],
+        plays: [],
+        prices: [],
+        results: [],
+      }));
+      return;
+    }
+    setRefreshing(true);
+    setError("");
+    try {
+      const [marketsRes, playsRes] = await Promise.all([
+        fetchPolymarketMarkets(baseUrl, nextEventId, nextCategory, PAGE_SIZE, 0),
+        fetchPolymarketPlays(baseUrl, nextEventId, PAGE_SIZE, 0),
+      ]);
+      const markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
+      const plays = Array.isArray(playsRes.data) ? playsRes.data : [];
+      setSelectedEventId(nextEventId);
+      setSelectedMarketId(markets.find((item) => item && item.pmMarketId)?.pmMarketId || "");
+      setData((prev) => ({
+        ...prev,
+        markets: attachLatestPricesToMarkets(markets, plays),
+        plays,
+        prices: [],
+        results: [],
       }));
     } catch (err) {
       setError(err?.message || "Polymarket 刷新失败");
+    } finally {
+      setRefreshing(false);
     }
   }, [baseUrl, selectedCategory]);
 
@@ -249,91 +306,43 @@ function PolymarketApp({ baseUrl }) {
     if (type === "polymarket-result") {
       const patch = normalizeResultPatch(message);
       if (!patch) return;
-      setData((prev) => {
-        const results = upsertByKey(prev.results, (row) => row.pmMarketId || row.marketId, patch);
-        return {
-          ...prev,
-          results,
-          markets: prev.markets.map((item) => (
-            item.pmMarketId === patch.pmMarketId
-              ? {
-                  ...item,
-                  status: "RESOLVED",
-                  resolvedOutcome: patch.resolvedOutcome ?? item.resolvedOutcome,
-                  resolvedAt: patch.resolvedAt ?? item.resolvedAt,
-                }
-              : item
-          )),
-          plays: prev.plays.map((item) => (
-            item.pmMarketId === patch.pmMarketId
-              ? {
-                  ...item,
-                  status: "RESOLVED",
-                  resolvedOutcome: patch.resolvedOutcome ?? item.resolvedOutcome,
-                  resolvedAt: patch.resolvedAt ?? item.resolvedAt,
-                }
-              : item
-          )),
-        };
-      });
+      setData((prev) => ({
+        ...prev,
+        markets: prev.markets.map((item) => (
+          item.pmMarketId === patch.pmMarketId
+            ? {
+                ...item,
+                status: "RESOLVED",
+                resolvedOutcome: patch.resolvedOutcome ?? item.resolvedOutcome,
+                resolvedAt: patch.resolvedAt ?? item.resolvedAt,
+              }
+            : item
+        )),
+        plays: prev.plays.map((item) => (
+          item.pmMarketId === patch.pmMarketId
+            ? {
+                ...item,
+                status: "RESOLVED",
+                resolvedOutcome: patch.resolvedOutcome ?? item.resolvedOutcome,
+                resolvedAt: patch.resolvedAt ?? item.resolvedAt,
+              }
+            : item
+        )),
+      }));
       return;
     }
     if (type === "polymarket-refresh" || type === "polymarket_refresh") {
       const reason = payload?.reason ?? payload?.data?.reason ?? "";
-      if (reason === "subscribe") {
+      if (reason === "subscribe" || reason.startsWith("price") || reason === "result") {
         return;
       }
-      if (reason.startsWith("price") || reason === "result") {
-        return;
-      }
-      // 其他刷新信号先忽略，避免整页重拉；如果后续需要可在这里补局部 patch。
       return;
     }
   }, []);
 
   useEffect(() => {
-    loadAll({ resetCategory: true });
-    return () => {
-      if (reloadTimerRef.current) {
-        clearTimeout(reloadTimerRef.current);
-        reloadTimerRef.current = null;
-      }
-    };
-  }, [loadAll]);
-
-  useEffect(() => {
-    if (loading || error || playSyncing) {
-      return;
-    }
-    if (data.plays.length > 0 || data.markets.length === 0) {
-      return;
-    }
-    if (playSyncTries >= 1) {
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setPlaySyncing(true);
-      try {
-        await syncPolymarketPlays(baseUrl);
-        if (!cancelled) {
-          setPlaySyncTries((prev) => prev + 1);
-          await loadAll({ resetCategory: true });
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err?.message || "同步玩法失败");
-        }
-      } finally {
-        if (!cancelled) {
-          setPlaySyncing(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [baseUrl, data.plays.length, data.markets.length, error, loadAll, loading, playSyncing, playSyncTries]);
+    loadHierarchy({ resetSelection: true });
+  }, [loadHierarchy]);
 
   usePolymarketSocket({
     baseUrl,
@@ -342,50 +351,38 @@ function PolymarketApp({ baseUrl }) {
     onConnectedChange: setSocketConnected,
   });
 
-  const visibleEventIds = useMemo(() => new Set((Array.isArray(data.events) ? data.events : []).map((item) => item.pmEventId).filter(Boolean)), [data.events]);
+  const selectedEvent = useMemo(() => (
+    (Array.isArray(data.events) ? data.events : []).find((item) => item && item.pmEventId === selectedEventId) || null
+  ), [data.events, selectedEventId]);
 
-  const filteredPlays = useMemo(() => {
+  const visiblePlays = useMemo(() => {
     const plays = Array.isArray(data.plays) ? data.plays : [];
-    if (!visibleEventIds.size) {
-      return [];
+    if (!selectedMarketId) {
+      return plays;
     }
-    return plays.filter((item) => item && item.pmEventId && visibleEventIds.has(item.pmEventId));
-  }, [data.plays, visibleEventIds]);
+    return plays.filter((item) => item && item.pmMarketId === selectedMarketId);
+  }, [data.plays, selectedMarketId]);
 
-  const filteredResults = useMemo(() => {
-    const marketIds = new Set((Array.isArray(data.markets) ? data.markets : []).map((item) => item.pmMarketId).filter(Boolean));
-    const results = Array.isArray(data.results) ? data.results : [];
-    if (!marketIds.size) {
-      return [];
-    }
-    return results.filter((item) => item && item.pmMarketId && marketIds.has(item.pmMarketId));
-  }, [data.markets, data.results]);
+  const resolvedPlays = useMemo(() => visiblePlays.filter((item) => item && (item.status === "RESOLVED" || item.resolvedOutcome)), [visiblePlays]);
 
   const summary = useMemo(() => ([
     { label: "分类", value: categories.length },
     { label: "事件", value: data.events.length },
     { label: "市场", value: data.markets.length },
-    { label: "玩法", value: filteredPlays.length },
-  ]), [categories.length, data.events.length, data.markets.length, filteredPlays.length]);
+    { label: "玩法", value: visiblePlays.length },
+  ]), [categories.length, data.events.length, data.markets.length, visiblePlays.length]);
 
   const currentList = useMemo(() => {
-    if (activeTab === "events") return data.events;
     if (activeTab === "markets") return data.markets;
-    if (activeTab === "results") return filteredResults;
-    return deriveDisplayCards(filteredPlays, data.markets);
-  }, [activeTab, data.events, data.markets, filteredPlays, filteredResults]);
+    if (activeTab === "results") return resolvedPlays;
+    return visiblePlays;
+  }, [activeTab, data.markets, resolvedPlays, visiblePlays]);
 
   useEffect(() => {
-    if (!loading) {
-      if (filteredPlays.length > 0) {
-        setActiveTab("plays");
-      } else if (data.markets.length > 0) {
-        setActiveTab("plays");
-      } else if (data.events.length > 0) {
-        setActiveTab("events");
-      }
+    if (!loading && !error && !["markets", "plays", "results"].includes(activeTab)) {
+      setActiveTab("markets");
     }
-  }, [loading, filteredPlays.length, data.markets.length, data.events.length]);
+  }, [activeTab, error, loading]);
 
   const handleSync = useCallback(async (type) => {
     setRefreshing(true);
@@ -393,16 +390,37 @@ function PolymarketApp({ baseUrl }) {
     try {
       if (type === "events") {
         await syncPolymarketEvents(baseUrl);
-      } else {
+      } else if (type === "markets") {
         await syncPolymarketMarkets(baseUrl);
+      } else {
+        await syncPolymarketPlays(baseUrl);
       }
-      await loadAll({ resetCategory: true });
+      await loadHierarchy({ category: selectedCategory, eventId: selectedEventId });
     } catch (err) {
       setError(err?.message || "同步失败");
     } finally {
       setRefreshing(false);
     }
-  }, [baseUrl, loadAll]);
+  }, [baseUrl, loadHierarchy, selectedCategory, selectedEventId]);
+
+  const handleCategoryClick = useCallback((category) => {
+    if (!category || category === selectedCategory) {
+      return;
+    }
+    loadHierarchy({ category, resetSelection: true });
+  }, [loadHierarchy, selectedCategory]);
+
+  const handleEventClick = useCallback((eventId) => {
+    if (!eventId || eventId === selectedEventId) {
+      return;
+    }
+    loadSelectedEvent(eventId, selectedCategory);
+  }, [loadSelectedEvent, selectedCategory, selectedEventId]);
+
+  const handleMarketClick = useCallback((marketId) => {
+    setSelectedMarketId((prev) => (prev === marketId ? prev : marketId));
+    setActiveTab("plays");
+  }, []);
 
   return (
     <div className="polymarket-shell">
@@ -410,7 +428,7 @@ function PolymarketApp({ baseUrl }) {
         <div>
           <h2 className="polymarket-hero-title">Polymarket 独立视图</h2>
           <div className="polymarket-hero-desc">
-            只看事件、市场、玩法、结果和价格，不复用现有球盘组件树。
+            先选 category，再选 event，再看 market / play。首屏只加载当前路径需要的数据。
           </div>
           <div className="polymarket-hero-desc" style={{ marginTop: 10, opacity: 0.9 }}>
             实时通道：{socketConnected ? "原生 WS 已连接" : "原生 WS 未连接"}，价格变化会自动刷新。
@@ -423,27 +441,10 @@ function PolymarketApp({ baseUrl }) {
           <button type="button" className="polymarket-action-btn secondary" onClick={() => handleSync("markets")} disabled={refreshing}>
             同步市场
           </button>
-          <button
-            type="button"
-            className="polymarket-action-btn secondary"
-            onClick={async () => {
-              setPlaySyncing(true);
-              setError("");
-              try {
-                await syncPolymarketPlays(baseUrl);
-                await loadAll({ resetCategory: true });
-                setActiveTab("plays");
-              } catch (err) {
-                setError(err?.message || "同步玩法失败");
-              } finally {
-                setPlaySyncing(false);
-              }
-            }}
-            disabled={refreshing || playSyncing}
-          >
-            {playSyncing ? "同步玩法中..." : "同步玩法"}
+          <button type="button" className="polymarket-action-btn secondary" onClick={() => handleSync("plays")} disabled={refreshing}>
+            同步玩法
           </button>
-          <button type="button" className="polymarket-action-btn primary" onClick={loadAll} disabled={loading || refreshing}>
+          <button type="button" className="polymarket-action-btn primary" onClick={() => loadHierarchy({ category: selectedCategory, eventId: selectedEventId })} disabled={loading || refreshing}>
             {loading || refreshing ? "刷新中..." : "刷新"}
           </button>
         </div>
@@ -466,18 +467,46 @@ function PolymarketApp({ baseUrl }) {
               key={category}
               type="button"
               className={selectedCategory === category ? "polymarket-tab active" : "polymarket-tab"}
-              onClick={() => {
-                if (category && category !== selectedCategory) {
-                  setSelectedCategory(category);
-                  loadAll({ category });
-                }
-              }}
+              onClick={() => handleCategoryClick(category)}
             >
               {category}
             </button>
           );
         })}
       </section>
+
+      <section className="polymarket-event-rail" aria-label="Polymarket event rail">
+        {(Array.isArray(data.events) ? data.events : []).map((item) => {
+          const eventId = item?.pmEventId || "";
+          return (
+            <button
+              key={eventId}
+              type="button"
+              className={selectedEventId === eventId ? "polymarket-event-chip active" : "polymarket-event-chip"}
+              onClick={() => handleEventClick(eventId)}
+            >
+              <span className="polymarket-event-chip-title">{item?.title || item?.slug || eventId}</span>
+              <span className="polymarket-event-chip-meta">{item?.category || selectedCategory || "-"} · {item?.status || "ACTIVE"}</span>
+            </button>
+          );
+        })}
+      </section>
+
+      {selectedCategory ? (
+        <div
+          style={{
+            padding: "10px 14px",
+            borderRadius: 14,
+            background: "rgba(255,255,255,0.72)",
+            border: "1px solid rgba(148,163,184,0.18)",
+            color: "#334155",
+            fontSize: 13,
+            fontWeight: 700,
+          }}
+        >
+          当前路径：{selectedCategory || "-"} / {selectedEvent?.title || selectedEvent?.slug || selectedEventId || "未选择 event"} / {selectedMarketId || "未选择 market"}
+        </div>
+      ) : null}
 
       <section className="polymarket-tabs" role="tablist" aria-label="Polymarket tabs">
         {TABS.map((tab) => (
@@ -496,10 +525,11 @@ function PolymarketApp({ baseUrl }) {
       {!error && !loading && !selectedCategory ? (
         <div className="pm-empty">当前没有已开启的分类，请先在管理后台开启 category。</div>
       ) : null}
-      {!error && !loading && filteredPlays.length === 0 && data.markets.length > 0 ? (
-        <div className="pm-empty">
-          玩法表暂时还没同步出来，当前用市场数据直接展示赔率。你可以先看市场卡片里的选项和价格。
-        </div>
+      {!error && !loading && selectedCategory && selectedEventId && data.markets.length === 0 ? (
+        <div className="pm-empty">当前 event 下还没有 market，或者 market 还在同步中。</div>
+      ) : null}
+      {!error && !loading && selectedCategory && selectedEventId && activeTab === "plays" && visiblePlays.length === 0 ? (
+        <div className="pm-empty">当前 event 下还没有玩法，或者玩法还在同步中。</div>
       ) : null}
       {loading ? <div className="pm-empty">正在加载 Polymarket 数据...</div> : null}
 
@@ -516,10 +546,19 @@ function PolymarketApp({ baseUrl }) {
                     ? parseMaybeJson(item.outcomePricesJson)
                     : [];
                 return (
-                  <article className="polymarket-card" key={item.pmPlayId || item.id || index}>
+                  <article
+                    className={selectedMarketId === item.pmMarketId ? "polymarket-card selected" : "polymarket-card"}
+                    key={item.pmPlayId || item.id || index}
+                    onClick={() => handleMarketClick(item.pmMarketId)}
+                    role="button"
+                    tabIndex={0}
+                  >
                     <div className="polymarket-card-head">
                       <div>
                         <h3 className="polymarket-card-title">{displayName}</h3>
+                        <div className="polymarket-card-subtitle">
+                          category：{item.category || selectedCategory || "-"} · event：{item.pmEventId || "-"}
+                        </div>
                         <div className="polymarket-card-subtitle">
                           token ids：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
                         </div>
@@ -574,11 +613,23 @@ function PolymarketApp({ baseUrl }) {
               }
 
               if (activeTab === "markets") {
+                const prices = Array.isArray(item.latestPrices) && item.latestPrices.length > 0
+                  ? item.latestPrices
+                  : buildLatestPrices(data.prices, item.pmMarketId);
                 return (
-                  <article className="polymarket-card" key={item.pmMarketId || item.id || index}>
+                  <article
+                    className={selectedMarketId === item.pmMarketId ? "polymarket-card selected" : "polymarket-card"}
+                    key={item.pmMarketId || item.id || index}
+                    onClick={() => handleMarketClick(item.pmMarketId)}
+                    role="button"
+                    tabIndex={0}
+                  >
                     <div className="polymarket-card-head">
                       <div>
                         <h3 className="polymarket-card-title">{item.question || item.description || item.pmMarketId || "Polymarket 市场"}</h3>
+                        <div className="polymarket-card-subtitle">
+                          category：{item.category || selectedCategory || "-"} · event：{item.pmEventId || "-"}
+                        </div>
                         <div className="polymarket-card-subtitle">
                           token ids：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
                         </div>
@@ -590,10 +641,9 @@ function PolymarketApp({ baseUrl }) {
                         {item.status || "ACTIVE"}
                       </div>
                     </div>
-                    <div className="card-hint">市场卡片可直接查看选项和赔率条，适合当前玩法表还未同步完的情况。</div>
+                    <div className="card-hint">选中一个 market 后，玩法会自动聚焦到这个 market。</div>
                     <div className="pm-options">
                       {(Array.isArray(parseMaybeJson(item.outcomesJson)) ? parseMaybeJson(item.outcomesJson) : []).map((name, idx) => {
-                        const prices = Array.isArray(data.prices) ? data.prices : [];
                         const priceRow = prices.find((row) => row.pmMarketId === item.pmMarketId && Number(row.outcomeIndex) === Number(idx));
                         const price = priceRow?.price ?? priceRow?.bestAsk ?? priceRow?.bestBid;
                         return (
@@ -623,56 +673,31 @@ function PolymarketApp({ baseUrl }) {
                 );
               }
 
-              if (activeTab === "results") {
-                return (
-                  <article className="polymarket-card" key={item.pmMarketId || item.id || index}>
-                    <div className="polymarket-card-head">
-                      <div>
-                        <h3 className="polymarket-card-title">{item.pmMarketId || item.marketId || "Polymarket 结果"}</h3>
-                        <div className="polymarket-card-subtitle">
-                          token ids：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
-                        </div>
-                        <div className="polymarket-card-subtitle">
-                          asset ids：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · resolvedAt：{item.resolvedAt || "-"} · source：{item.resolutionSource || "-"}
-                        </div>
-                      </div>
-                      <div className="polymarket-pill green">{item.resolvedOutcome || "RESOLVED"}</div>
-                    </div>
-                    <div className="pm-options">
-                      <div className="pm-option">
-                        <div className="pm-option-name">resolved value</div>
-                        <div className="pm-option-price">{item.resolvedValue || "—"}</div>
-                      </div>
-                      <div className="pm-option">
-                        <div className="pm-option-name">market</div>
-                        <div className="pm-option-price">{item.pmMarketId || "—"}</div>
-                      </div>
-                    </div>
-                  </article>
-                );
-              }
-
               return (
-                <article className="polymarket-card" key={item.pmEventId || item.id || index}>
+                <article className="polymarket-card" key={item.pmMarketId || item.marketId || index}>
                   <div className="polymarket-card-head">
                     <div>
-                      <h3 className="polymarket-card-title">{item.title || item.slug || item.pmEventId || "Polymarket 事件"}</h3>
+                      <h3 className="polymarket-card-title">{item.pmMarketId || item.marketId || "Polymarket 结果"}</h3>
                       <div className="polymarket-card-subtitle">
-                        category：{item.category || "-"} · sub：{item.subCategory || item.sub_category || "-"}
+                        category：{item.category || selectedCategory || "-"} · event：{item.pmEventId || "-"}
+                      </div>
+                      <div className="polymarket-card-subtitle">
+                        token ids：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
+                      </div>
+                      <div className="polymarket-card-subtitle">
+                        asset ids：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · resolvedAt：{item.resolvedAt || "-"} · source：{item.resolutionSource || "-"}
                       </div>
                     </div>
-                    <div className={item.status === "RESOLVED" ? "polymarket-pill green" : "polymarket-pill"}>
-                      {item.status || "ACTIVE"}
-                    </div>
+                    <div className="polymarket-pill green">{item.resolvedOutcome || "RESOLVED"}</div>
                   </div>
                   <div className="pm-options">
                     <div className="pm-option">
-                      <div className="pm-option-name">开始时间</div>
-                      <div className="pm-option-price" style={{ fontSize: 14 }}>{item.startTime || item.start_time || "—"}</div>
+                      <div className="pm-option-name">resolved value</div>
+                      <div className="pm-option-price">{item.resolvedValue || "—"}</div>
                     </div>
                     <div className="pm-option">
-                      <div className="pm-option-name">结束时间</div>
-                      <div className="pm-option-price" style={{ fontSize: 14 }}>{item.endTime || item.end_time || "—"}</div>
+                      <div className="pm-option-name">market</div>
+                      <div className="pm-option-price">{item.pmMarketId || "—"}</div>
                     </div>
                   </div>
                 </article>
