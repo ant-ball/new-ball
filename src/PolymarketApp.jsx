@@ -165,7 +165,7 @@ function PolymarketApp({ baseUrl }) {
     results: [],
   });
 
-  const loadAll = useCallback(async () => {
+  const loadAll = useCallback(async ({ category = "", resetCategory = false } = {}) => {
     setLoading(true);
     setError("");
     try {
@@ -174,12 +174,11 @@ function PolymarketApp({ baseUrl }) {
       const enabledCategories = categoryRows
         .filter((item) => item && item.category)
         .map((item) => item.category);
-      const resolvedCategory = enabledCategories.includes(selectedCategory)
-        ? selectedCategory
-        : (enabledCategories[0] || "");
-      if (resolvedCategory !== selectedCategory) {
-        setSelectedCategory(resolvedCategory);
-      }
+      const requestedCategory = category || "";
+      const resolvedCategory = resetCategory
+        ? (enabledCategories[0] || "")
+        : (enabledCategories.includes(requestedCategory) ? requestedCategory : (enabledCategories[0] || ""));
+      setSelectedCategory((prev) => (prev === resolvedCategory ? prev : resolvedCategory));
       setCategories(categoryRows);
       const [eventsRes, marketsRes, playsRes, pricesRes, resultsRes] = await Promise.all([
         fetchPolymarketEvents(baseUrl, resolvedCategory),
@@ -293,7 +292,7 @@ function PolymarketApp({ baseUrl }) {
   }, []);
 
   useEffect(() => {
-    loadAll();
+    loadAll({ resetCategory: true });
     return () => {
       if (reloadTimerRef.current) {
         clearTimeout(reloadTimerRef.current);
@@ -319,7 +318,7 @@ function PolymarketApp({ baseUrl }) {
         await syncPolymarketPlays(baseUrl);
         if (!cancelled) {
           setPlaySyncTries((prev) => prev + 1);
-          await loadAll();
+          await loadAll({ resetCategory: true });
         }
       } catch (err) {
         if (!cancelled) {
@@ -388,13 +387,6 @@ function PolymarketApp({ baseUrl }) {
     }
   }, [loading, filteredPlays.length, data.markets.length, data.events.length]);
 
-  useEffect(() => {
-    if (!selectedCategory) {
-      return;
-    }
-    loadAll();
-  }, [selectedCategory, loadAll]);
-
   const handleSync = useCallback(async (type) => {
     setRefreshing(true);
     setError("");
@@ -404,7 +396,7 @@ function PolymarketApp({ baseUrl }) {
       } else {
         await syncPolymarketMarkets(baseUrl);
       }
-      await loadAll();
+      await loadAll({ resetCategory: true });
     } catch (err) {
       setError(err?.message || "同步失败");
     } finally {
@@ -439,7 +431,7 @@ function PolymarketApp({ baseUrl }) {
               setError("");
               try {
                 await syncPolymarketPlays(baseUrl);
-                await loadAll();
+                await loadAll({ resetCategory: true });
                 setActiveTab("plays");
               } catch (err) {
                 setError(err?.message || "同步玩法失败");
@@ -477,6 +469,7 @@ function PolymarketApp({ baseUrl }) {
               onClick={() => {
                 if (category && category !== selectedCategory) {
                   setSelectedCategory(category);
+                  loadAll({ category });
                 }
               }}
             >
