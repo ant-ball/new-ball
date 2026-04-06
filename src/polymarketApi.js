@@ -93,3 +93,8 @@ export async function createPolymarketOrder(baseUrl, orderData) {
   });
   return { url, data: unwrapData(json) || json };
 }
+
+export async function fetchPolymarketOrders(baseUrl, offset = 0, limit = 50) {
+  const { url, json } = await requestJson(baseUrl, `/polymarket/orders?offset=${offset}&limit=${limit}`);
+  return { url, data: unwrapData(json) || [] };
+}

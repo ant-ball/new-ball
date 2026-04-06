@@ -8,6 +8,7 @@ import {
   syncPolymarketMarkets,
   syncPolymarketPlays,
   createPolymarketOrder,
+  fetchPolymarketOrders,
 } from "./polymarketApi";
 import { usePolymarketSocket } from "./usePolymarketSocket";
 
@@ -17,6 +18,7 @@ const TABS = [
   { key: "plays", label: "玩法" },
   { key: "markets", label: "市场" },
   { key: "results", label: "结果" },
+  { key: "orders", label: "我的订单" },
 ];
 
 function parseMaybeJson(value) {
@@ -31,16 +33,16 @@ function parseMaybeJson(value) {
 }
 
 function formatPrice(value) {
-  if (value == null || value === "") return "—";
+  if (value == null || value === "") return "-";
   const num = Number(value);
   if (Number.isNaN(num)) return String(value);
   return num.toFixed(4).replace(/\.?0+$/, "");
 }
 
 function formatProbability(value) {
-  if (value == null || value === "") return "—";
+  if (value == null || value === "") return "-";
   const num = Number(value);
-  if (Number.isNaN(num)) return "—";
+  if (Number.isNaN(num)) return "-";
   const percent = num <= 1 ? num * 100 : num;
   return `${percent.toFixed(percent % 1 === 0 ? 0 : 1)}%`;
 }
@@ -198,6 +200,8 @@ function PolymarketApp({ baseUrl }) {
   const [orderModal, setOrderModal] = useState(null); // { play, outcomeIndex, outcomeName, side }
   const [orderAmount, setOrderAmount] = useState("");
   const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
   const [data, setData] = useState({
     categories: [],
     events: [],
@@ -412,7 +416,7 @@ function PolymarketApp({ baseUrl }) {
     onConnectedChange: setSocketConnected,
   });
 
-  // 当选中 event 变化时，订阅该 event 的价格推送
+  // 当选中 event 变化时,订阅该 event 的价格推送
   useEffect(() => {
     if (selectedEventId && wsConnected) {
       subscribeEvent(selectedEventId);
@@ -443,11 +447,12 @@ function PolymarketApp({ baseUrl }) {
   const currentList = useMemo(() => {
     if (activeTab === "markets") return data.markets;
     if (activeTab === "results") return resolvedPlays;
+    if (activeTab === "orders") return orders;
     return visiblePlays;
-  }, [activeTab, data.markets, resolvedPlays, visiblePlays]);
+  }, [activeTab, data.markets, resolvedPlays, visiblePlays, orders]);
 
   useEffect(() => {
-    if (!loading && !error && !["markets", "plays", "results"].includes(activeTab)) {
+    if (!loading && !error && !["markets", "plays", "results", "orders"].includes(activeTab)) {
       setActiveTab("markets");
     }
   }, [activeTab, error, loading]);
@@ -494,7 +499,7 @@ function PolymarketApp({ baseUrl }) {
     }
     setSelectedMarketId(marketId);
     setActiveTab("plays");
-    // 重新请求带 pmMarketId 的 plays，确保能获取到该 market 的玩法
+    // 重新请求带 pmMarketId 的 plays,确保能获取到该 market 的玩法
     try {
       const playsRes = await fetchPolymarketPlays(baseUrl, selectedEventId, PLAYS_PAGE_SIZE, 0, marketId);
       const plays = Array.isArray(playsRes.data) ? playsRes.data : [];
@@ -534,8 +539,10 @@ function PolymarketApp({ baseUrl }) {
         orderPrice: price || 0,
         orderAmount: parseFloat(orderAmount) || 0,
       });
-      alert("下单成功！");
+      alert("下单成功!");
       setOrderModal(null);
+      // 切换到订单 tab，会自动加载订单
+      setActiveTab("orders");
     } catch (err) {
       alert("下单失败: " + (err?.message || "未知错误"));
     } finally {
@@ -548,16 +555,35 @@ function PolymarketApp({ baseUrl }) {
     setOrderAmount("");
   }, []);
 
+  const loadOrders = useCallback(async () => {
+    setOrdersLoading(true);
+    try {
+      const res = await fetchPolymarketOrders(baseUrl, 0, 50);
+      setOrders(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.warn("加载订单失败:", err);
+    } finally {
+      setOrdersLoading(false);
+    }
+  }, [baseUrl]);
+
+  // 切换到订单 tab 时加载订单
+  useEffect(() => {
+    if (activeTab === "orders") {
+      loadOrders();
+    }
+  }, [activeTab, loadOrders]);
+
   return (
     <div className="polymarket-shell">
       <section className="polymarket-hero">
         <div>
           <h2 className="polymarket-hero-title">Polymarket 独立视图</h2>
           <div className="polymarket-hero-desc">
-            先选 category，再选 event，再看 market / play。首屏只加载当前路径需要的数据。
+            先选 category,再选 event,再看 market / play。首屏只加载当前路径需要的数据。
           </div>
           <div className="polymarket-hero-desc" style={{ marginTop: 10, opacity: 0.9 }}>
-            实时通道：{socketConnected ? "原生 WS 已连接" : "原生 WS 未连接"}，价格变化会自动刷新。
+            实时通道:{socketConnected ? "原生 WS 已连接" : "原生 WS 未连接"},价格变化会自动刷新。
           </div>
         </div>
         <div className="polymarket-actions">
@@ -630,7 +656,7 @@ function PolymarketApp({ baseUrl }) {
             fontWeight: 700,
           }}
         >
-          当前路径：{selectedCategory || "-"} / {selectedEvent?.title || selectedEvent?.slug || selectedEventId || "未选择 event"} / {selectedMarketId || "未选择 market"}
+          当前路径:{selectedCategory || "-"} / {selectedEvent?.title || selectedEvent?.slug || selectedEventId || "未选择 event"} / {selectedMarketId || "未选择 market"}
         </div>
       ) : null}
 
@@ -649,17 +675,17 @@ function PolymarketApp({ baseUrl }) {
 
       {error ? <div className="pm-empty" style={{ color: "#dc2626" }}>{error}</div> : null}
       {!error && !loading && !selectedCategory ? (
-        <div className="pm-empty">当前没有已开启的分类，请先在管理后台开启 category。</div>
+        <div className="pm-empty">当前没有已开启的分类,请先在管理后台开启 category。</div>
       ) : null}
       {!error && !loading && selectedCategory && selectedEventId && data.markets.length === 0 ? (
-        <div className="pm-empty">当前 event 下还没有 market，或者 market 还在同步中。</div>
+        <div className="pm-empty">当前 event 下还没有 market,或者 market 还在同步中。</div>
       ) : null}
       {!error && !loading && selectedCategory && selectedEventId && activeTab === "plays" && visiblePlays.length === 0 ? (
-        <div className="pm-empty">当前 event 下还没有玩法，或者玩法还在同步中。</div>
+        <div className="pm-empty">当前 event 下还没有玩法,或者玩法还在同步中。</div>
       ) : null}
       {loading ? <div className="pm-empty">正在加载 Polymarket 数据...</div> : null}
 
-      {!loading && !error && selectedCategory ? (
+      {!loading && !error && (selectedCategory || activeTab === "orders") ? (
         currentList.length ? (
           <section className="polymarket-grid">
             {currentList.map((item, index) => {
@@ -683,13 +709,13 @@ function PolymarketApp({ baseUrl }) {
                       <div>
                         <h3 className="polymarket-card-title">{displayName}</h3>
                         <div className="polymarket-card-subtitle">
-                          category：{item.category || selectedCategory || "-"} · event：{item.pmEventId || "-"}
+                          category:{item.category || selectedCategory || "-"} · event:{item.pmEventId || "-"}
                         </div>
                         <div className="polymarket-card-subtitle">
-                          token ids：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
+                          token ids:{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
                         </div>
                         <div className="polymarket-card-subtitle">
-                          asset ids：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · 结果：{item.resolvedOutcome || "-"}
+                          asset ids:{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · 结果:{item.resolvedOutcome || "-"}
                         </div>
                       </div>
                       <div className={item.status === "RESOLVED" ? "polymarket-pill green" : "polymarket-pill"}>
@@ -698,8 +724,8 @@ function PolymarketApp({ baseUrl }) {
                     </div>
                     <div className="card-hint">
                       {item.__kind === "market"
-                        ? "玩法表还没同步完，先用市场数据生成玩法视图。"
-                        : "真实玩法表数据，已从 tbl_polymarket_play 读取。"}
+                        ? "玩法表还没同步完,先用市场数据生成玩法视图。"
+                        : "真实玩法表数据,已从 tbl_polymarket_play 读取。"}
                     </div>
                     <div className="pm-options">
                       {outcomeList.map((name, idx) => {
@@ -749,7 +775,7 @@ function PolymarketApp({ baseUrl }) {
                       {outcomeList.length === 0 ? (
                         <div className="pm-option">
                           <div className="pm-option-name">未配置选项</div>
-                          <div className="pm-option-price">—</div>
+                          <div className="pm-option-price">-</div>
                         </div>
                       ) : null}
                     </div>
@@ -773,20 +799,20 @@ function PolymarketApp({ baseUrl }) {
                       <div>
                         <h3 className="polymarket-card-title">{item.question || item.description || item.pmMarketId || "Polymarket 市场"}</h3>
                         <div className="polymarket-card-subtitle">
-                          category：{item.category || selectedCategory || "-"} · event：{item.pmEventId || "-"}
+                          category:{item.category || selectedCategory || "-"} · event:{item.pmEventId || "-"}
                         </div>
                         <div className="polymarket-card-subtitle">
-                          token ids：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
+                          token ids:{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
                         </div>
                         <div className="polymarket-card-subtitle">
-                          asset ids：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · condition：{item.conditionId || "-"}
+                          asset ids:{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · condition:{item.conditionId || "-"}
                         </div>
                       </div>
                       <div className={item.status === "RESOLVED" ? "polymarket-pill green" : "polymarket-pill"}>
                         {item.status || "ACTIVE"}
                       </div>
                     </div>
-                    <div className="card-hint">选中一个 market 后，玩法会自动聚焦到这个 market。</div>
+                    <div className="card-hint">选中一个 market 后,玩法会自动聚焦到这个 market。</div>
                     <div className="pm-options">
                       {(Array.isArray(parseMaybeJson(item.outcomesJson)) ? parseMaybeJson(item.outcomesJson) : []).map((name, idx) => {
                         const priceRow = prices.find((row) => row.pmMarketId === item.pmMarketId && Number(row.outcomeIndex) === Number(idx));
@@ -818,19 +844,69 @@ function PolymarketApp({ baseUrl }) {
                 );
               }
 
+              if (activeTab === "orders") {
+                return (
+                  <article className="polymarket-card" key={item.orderNo || item.id || index}>
+                    <div className="polymarket-card-head">
+                      <div>
+                        <h3 className="polymarket-card-title">{item.selectionName || item.selectionCode || "订单"}</h3>
+                        <div className="polymarket-card-subtitle">
+                          订单号:{item.orderNo || "-"}
+                        </div>
+                        <div className="polymarket-card-subtitle">
+                          市场:{item.pmMarketId || "-"} · 事件:{item.pmEventId || "-"}
+                        </div>
+                        <div className="polymarket-card-subtitle">
+                          下单时间:{item.createdAt ? new Date(item.createdAt).toLocaleString() : "-"}
+                        </div>
+                      </div>
+                      <div className={`polymarket-pill ${item.settleStatus === "WIN" ? "green" : item.settleStatus === "LOSE" ? "red" : ""}`}>
+                        {item.settleStatus || "OPEN"}
+                      </div>
+                    </div>
+                    <div className="pm-options">
+                      <div className="pm-option">
+                        <div className="pm-option-name">下单金额</div>
+                        <div className="pm-option-price">{item.orderAmount || 0} {item.currency || "USDT"}</div>
+                      </div>
+                      <div className="pm-option">
+                        <div className="pm-option-name">下单概率</div>
+                        <div className="pm-option-price">{item.orderPrice ? (item.orderPrice * 100).toFixed(1) + "%" : "-"}</div>
+                      </div>
+                      <div className="pm-option">
+                        <div className="pm-option-name">潜在收益</div>
+                        <div className="pm-option-price">
+                          {item.orderAmount && item.orderPrice
+                            ? (item.orderAmount / item.orderPrice).toFixed(2) + " " + (item.currency || "USDT")
+                            : "-"}
+                        </div>
+                      </div>
+                      {item.settlePnl != null && (
+                        <div className="pm-option">
+                          <div className="pm-option-name">结算盈亏</div>
+                          <div className="pm-option-price" style={{ color: item.settlePnl > 0 ? "#22c55e" : item.settlePnl < 0 ? "#ef4444" : "inherit" }}>
+                            {item.settlePnl > 0 ? "+" : ""}{item.settlePnl} {item.currency || "USDT"}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                );
+              }
+
               return (
                 <article className="polymarket-card" key={item.pmMarketId || item.marketId || index}>
                   <div className="polymarket-card-head">
                     <div>
                       <h3 className="polymarket-card-title">{item.pmMarketId || item.marketId || "Polymarket 结果"}</h3>
                       <div className="polymarket-card-subtitle">
-                        category：{item.category || selectedCategory || "-"} · event：{item.pmEventId || "-"}
+                        category:{item.category || selectedCategory || "-"} · event:{item.pmEventId || "-"}
                       </div>
                       <div className="polymarket-card-subtitle">
-                        token ids：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
+                        token ids:{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
                       </div>
                       <div className="polymarket-card-subtitle">
-                        asset ids：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · resolvedAt：{item.resolvedAt || "-"} · source：{item.resolutionSource || "-"}
+                        asset ids:{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · resolvedAt:{item.resolvedAt || "-"} · source:{item.resolutionSource || "-"}
                       </div>
                     </div>
                     <div className="polymarket-pill green">{item.resolvedOutcome || "RESOLVED"}</div>
@@ -838,11 +914,11 @@ function PolymarketApp({ baseUrl }) {
                   <div className="pm-options">
                     <div className="pm-option">
                       <div className="pm-option-name">resolved value</div>
-                      <div className="pm-option-price">{item.resolvedValue || "—"}</div>
+                      <div className="pm-option-price">{item.resolvedValue || "-"}</div>
                     </div>
                     <div className="pm-option">
                       <div className="pm-option-name">market</div>
-                      <div className="pm-option-price">{item.pmMarketId || "—"}</div>
+                      <div className="pm-option-price">{item.pmMarketId || "-"}</div>
                     </div>
                   </div>
                 </article>
@@ -850,7 +926,11 @@ function PolymarketApp({ baseUrl }) {
             })}
           </section>
         ) : (
-          <div className="pm-empty">当前没有数据，可以先点“同步事件”或“同步市场”。</div>
+          <div className="pm-empty">
+            {activeTab === "orders" 
+              ? (ordersLoading ? "加载订单中..." : "暂无订单记录") 
+              : "当前没有数据，可以先点"同步事件"或"同步市场"。"}
+          </div>
         )
       ) : null}
 
