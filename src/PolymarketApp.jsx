@@ -11,6 +11,7 @@ import {
 import { usePolymarketSocket } from "./usePolymarketSocket";
 
 const PAGE_SIZE = 20;
+const PLAYS_PAGE_SIZE = 50;
 const TABS = [
   { key: "plays", label: "玩法" },
   { key: "markets", label: "市场" },
@@ -223,7 +224,7 @@ function PolymarketApp({ baseUrl }) {
       if (resolvedEventId) {
         const [marketsRes, playsRes] = await Promise.all([
           fetchPolymarketMarkets(baseUrl, resolvedEventId, resolvedCategory, PAGE_SIZE, 0),
-          fetchPolymarketPlays(baseUrl, resolvedEventId, PAGE_SIZE, 0),
+          fetchPolymarketPlays(baseUrl, resolvedEventId, PLAYS_PAGE_SIZE, 0),
         ]);
         markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
         plays = Array.isArray(playsRes.data) ? playsRes.data : [];
@@ -268,7 +269,7 @@ function PolymarketApp({ baseUrl }) {
     try {
       const [marketsRes, playsRes] = await Promise.all([
         fetchPolymarketMarkets(baseUrl, nextEventId, nextCategory, PAGE_SIZE, 0),
-        fetchPolymarketPlays(baseUrl, nextEventId, PAGE_SIZE, 0),
+        fetchPolymarketPlays(baseUrl, nextEventId, PLAYS_PAGE_SIZE, 0),
       ]);
       const markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
       const plays = Array.isArray(playsRes.data) ? playsRes.data : [];
@@ -368,7 +369,7 @@ function PolymarketApp({ baseUrl }) {
         if (initialEventId) {
           const [marketsRes, playsRes] = await Promise.all([
             fetchPolymarketMarkets(baseUrl, initialEventId, initialCategory, PAGE_SIZE, 0),
-            fetchPolymarketPlays(baseUrl, initialEventId, PAGE_SIZE, 0),
+            fetchPolymarketPlays(baseUrl, initialEventId, PLAYS_PAGE_SIZE, 0),
           ]);
           markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
           plays = Array.isArray(playsRes.data) ? playsRes.data : [];
@@ -482,10 +483,27 @@ function PolymarketApp({ baseUrl }) {
     loadSelectedEvent(eventId, selectedCategory);
   }, [loadSelectedEvent, selectedCategory, selectedEventId]);
 
-  const handleMarketClick = useCallback((marketId) => {
-    setSelectedMarketId((prev) => (prev === marketId ? prev : marketId));
+  const handleMarketClick = useCallback(async (marketId) => {
+    if (!marketId || marketId === selectedMarketId) {
+      setActiveTab("plays");
+      return;
+    }
+    setSelectedMarketId(marketId);
     setActiveTab("plays");
-  }, []);
+    // 重新请求带 pmMarketId 的 plays，确保能获取到该 market 的玩法
+    try {
+      const playsRes = await fetchPolymarketPlays(baseUrl, selectedEventId, PLAYS_PAGE_SIZE, 0, marketId);
+      const plays = Array.isArray(playsRes.data) ? playsRes.data : [];
+      if (plays.length > 0) {
+        setData((prev) => ({
+          ...prev,
+          plays,
+        }));
+      }
+    } catch (err) {
+      console.warn("加载 market plays 失败:", err);
+    }
+  }, [baseUrl, selectedEventId, selectedMarketId]);
 
   return (
     <div className="polymarket-shell">
