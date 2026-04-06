@@ -594,10 +594,10 @@ function PolymarketApp({ baseUrl, balance }) {
         <div>
           <h2 className="polymarket-hero-title">Polymarket 独立视图</h2>
           <div className="polymarket-hero-desc">
-            先选 category,再选 event,再看 market / play。首屏只加载当前路径需要的数据。
+            先选 category，再选 event，再看 market / play。首屏只加载当前路径需要的数据。
           </div>
           <div className="polymarket-hero-desc" style={{ marginTop: 10, opacity: 0.9 }}>
-            实时通道:{socketConnected ? "原生 WS 已连接" : "原生 WS 未连接"},价格变化会自动刷新。
+            实时通道：{socketConnected ? "原生 WS 已连接" : "原生 WS 未连接"}，价格变化会自动刷新。
           </div>
           {balance && (
             <div className="polymarket-hero-desc" style={{ marginTop: 10, padding: "8px 12px", background: "#f1f5f9", borderRadius: 6, fontSize: 14 }}>
@@ -950,7 +950,7 @@ function PolymarketApp({ baseUrl, balance }) {
           <div className="pm-empty">
             {activeTab === "orders" 
               ? (ordersLoading ? "加载订单中..." : "暂无订单记录") 
-              : "当前没有数据，可以先点"同步事件"或"同步市场"。"}
+              : "当前没有数据，可以先点\"同步事件\"或\"同步市场\"。"}
           </div>
         )
       ) : null}
