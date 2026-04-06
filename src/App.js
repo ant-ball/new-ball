@@ -52,6 +52,23 @@ function App() {
 
   const activeLabel = viewMode === 'ball' ? '球盘' : 'Polymarket';
 
+  const refreshBalance = useCallback(async () => {
+    try {
+      const bal = await fetchUserBalance(baseUrl);
+      setBalance(bal);
+    } catch (err) {
+      console.warn('刷新余额失败:', err);
+    }
+  }, [baseUrl]);
+
+  // 将刷新余额函数挂载到 window 上，供子组件调用
+  useEffect(() => {
+    window.refreshBalance = refreshBalance;
+    return () => {
+      delete window.refreshBalance;
+    };
+  }, [refreshBalance]);
+
   return (
     <div className="app-shell">
       <header className="app-topbar">
@@ -102,7 +119,7 @@ function App() {
         {authLoading ? null : authError ? null : viewMode === 'ball' ? (
           <Ball />
         ) : (
-          <PolymarketApp baseUrl={baseUrl} />
+          <PolymarketApp baseUrl={baseUrl} balance={balance} />
         )}
       </main>
     </div>

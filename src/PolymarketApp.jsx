@@ -187,7 +187,8 @@ function parseTokenIds(item) {
   return [];
 }
 
-function PolymarketApp({ baseUrl }) {
+function PolymarketApp({ baseUrl, balance }) {
+  const availableBalance = parseFloat(balance?.amount || 0) - parseFloat(balance?.froze || 0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("markets");
@@ -524,6 +525,15 @@ function PolymarketApp({ baseUrl }) {
 
   const handleOrderSubmit = useCallback(async () => {
     if (!orderModal || !orderAmount || orderSubmitting) return;
+    
+    const orderAmountNum = parseFloat(orderAmount);
+    
+    // 余额校验
+    if (orderAmountNum > availableBalance) {
+      alert(`下单金额超过可用余额！可用余额：${availableBalance.toFixed(2)} USDT`);
+      return;
+    }
+    
     setOrderSubmitting(true);
     try {
       const { play, outcomeIndex, outcomeName, side, tokenId } = orderModal;
@@ -537,18 +547,22 @@ function PolymarketApp({ baseUrl }) {
         orderSide: side,
         orderType: "MARKET",
         orderPrice: price || 0,
-        orderAmount: parseFloat(orderAmount) || 0,
+        orderAmount: orderAmountNum,
       });
       alert("下单成功!");
       setOrderModal(null);
       // 切换到订单 tab，会自动加载订单
       setActiveTab("orders");
+      // 通知父组件刷新余额
+      if (typeof window.refreshBalance === "function") {
+        window.refreshBalance();
+      }
     } catch (err) {
       alert("下单失败: " + (err?.message || "未知错误"));
     } finally {
       setOrderSubmitting(false);
     }
-  }, [baseUrl, orderModal, orderAmount, orderSubmitting]);
+  }, [baseUrl, orderModal, orderAmount, orderSubmitting, availableBalance]);
 
   const handleOrderClose = useCallback(() => {
     setOrderModal(null);
@@ -585,6 +599,13 @@ function PolymarketApp({ baseUrl }) {
           <div className="polymarket-hero-desc" style={{ marginTop: 10, opacity: 0.9 }}>
             实时通道:{socketConnected ? "原生 WS 已连接" : "原生 WS 未连接"},价格变化会自动刷新。
           </div>
+          {balance && (
+            <div className="polymarket-hero-desc" style={{ marginTop: 10, padding: "8px 12px", background: "#f1f5f9", borderRadius: 6, fontSize: 14 }}>
+              <span style={{ fontWeight: 600 }}>可用余额: {availableBalance.toFixed(2)} USDT</span>
+              <span style={{ marginLeft: 16, opacity: 0.7 }}>总余额: {parseFloat(balance.amount || 0).toFixed(2)}</span>
+              <span style={{ marginLeft: 16, opacity: 0.7 }}>冻结: {parseFloat(balance.froze || 0).toFixed(2)}</span>
+            </div>
+          )}
         </div>
         <div className="polymarket-actions">
           <button type="button" className="polymarket-action-btn secondary" onClick={() => handleSync("events")} disabled={refreshing}>
@@ -968,24 +989,36 @@ function PolymarketApp({ baseUrl }) {
             <div style={{ marginBottom: 12, fontSize: 14, color: "#64748b" }}>
               市场: {orderModal.play?.question || orderModal.play?.pmMarketId}
             </div>
+            <div style={{ marginBottom: 12, padding: "10px 12px", background: "#f1f5f9", borderRadius: 8, fontSize: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>可用余额:</span>
+                <span style={{ fontWeight: 600 }}>{availableBalance.toFixed(2)} USDT</span>
+              </div>
+            </div>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", marginBottom: 6, fontWeight: 600, fontSize: 14 }}>
-                金额 (USDC)
+                金额 (USDT)
               </label>
               <input
                 type="number"
                 value={orderAmount}
                 onChange={(e) => setOrderAmount(e.target.value)}
                 placeholder="输入金额"
+                max={availableBalance}
                 style={{
                   width: "100%",
                   padding: "10px 12px",
                   borderRadius: 8,
-                  border: "1px solid #e2e8f0",
+                  border: parseFloat(orderAmount) > availableBalance ? "1px solid #ef4444" : "1px solid #e2e8f0",
                   fontSize: 16,
                   boxSizing: "border-box",
                 }}
               />
+              {parseFloat(orderAmount) > availableBalance && (
+                <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>
+                  下单金额不能超过可用余额
+                </div>
+              )}
             </div>
             <div style={{ display: "flex", gap: 12 }}>
               <button
@@ -1007,7 +1040,7 @@ function PolymarketApp({ baseUrl }) {
               <button
                 type="button"
                 onClick={handleOrderSubmit}
-                disabled={orderSubmitting || !orderAmount}
+                disabled={orderSubmitting || !orderAmount || parseFloat(orderAmount) > availableBalance}
                 style={{
                   flex: 1,
                   padding: "12px",
@@ -1017,8 +1050,8 @@ function PolymarketApp({ baseUrl }) {
                   color: "#fff",
                   fontWeight: 600,
                   fontSize: 14,
-                  cursor: orderSubmitting || !orderAmount ? "not-allowed" : "pointer",
-                  opacity: orderSubmitting || !orderAmount ? 0.6 : 1,
+                  cursor: orderSubmitting || !orderAmount || parseFloat(orderAmount) > availableBalance ? "not-allowed" : "pointer",
+                  opacity: orderSubmitting || !orderAmount || parseFloat(orderAmount) > availableBalance ? 0.6 : 1,
                 }}
               >
                 {orderSubmitting ? "提交中..." : "确认"}
