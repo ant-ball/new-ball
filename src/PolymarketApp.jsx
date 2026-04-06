@@ -7,6 +7,7 @@ import {
   syncPolymarketEvents,
   syncPolymarketMarkets,
   syncPolymarketPlays,
+  createPolymarketOrder,
 } from "./polymarketApi";
 import { usePolymarketSocket } from "./usePolymarketSocket";
 
@@ -194,6 +195,9 @@ function PolymarketApp({ baseUrl }) {
   const [selectedMarketId, setSelectedMarketId] = useState("");
   const [error, setError] = useState("");
   const [socketConnected, setSocketConnected] = useState(false);
+  const [orderModal, setOrderModal] = useState(null); // { play, outcomeIndex, outcomeName, side }
+  const [orderAmount, setOrderAmount] = useState("");
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
   const [data, setData] = useState({
     categories: [],
     events: [],
@@ -505,6 +509,45 @@ function PolymarketApp({ baseUrl }) {
     }
   }, [baseUrl, selectedEventId, selectedMarketId]);
 
+  const handleOrderClick = useCallback((e, play, outcomeIndex, outcomeName, side) => {
+    e.stopPropagation();
+    const tokenIds = parseTokenIds(play);
+    const tokenId = tokenIds[outcomeIndex] || "";
+    setOrderModal({ play, outcomeIndex, outcomeName, side, tokenId });
+    setOrderAmount("");
+  }, []);
+
+  const handleOrderSubmit = useCallback(async () => {
+    if (!orderModal || !orderAmount || orderSubmitting) return;
+    setOrderSubmitting(true);
+    try {
+      const { play, outcomeIndex, outcomeName, side, tokenId } = orderModal;
+      const price = extractOutcomePrice(play, outcomeIndex);
+      await createPolymarketOrder(baseUrl, {
+        pmEventId: play.pmEventId,
+        pmMarketId: play.pmMarketId,
+        tokenId,
+        selectionCode: outcomeName,
+        selectionName: outcomeName,
+        orderSide: side,
+        orderType: "MARKET",
+        orderPrice: price || 0,
+        orderAmount: parseFloat(orderAmount) || 0,
+      });
+      alert("下单成功！");
+      setOrderModal(null);
+    } catch (err) {
+      alert("下单失败: " + (err?.message || "未知错误"));
+    } finally {
+      setOrderSubmitting(false);
+    }
+  }, [baseUrl, orderModal, orderAmount, orderSubmitting]);
+
+  const handleOrderClose = useCallback(() => {
+    setOrderModal(null);
+    setOrderAmount("");
+  }, []);
+
   return (
     <div className="polymarket-shell">
       <section className="polymarket-hero">
@@ -681,6 +724,42 @@ function PolymarketApp({ baseUrl }) {
                                 }}
                               />
                             </div>
+                            <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+                              <button
+                                type="button"
+                                onClick={(e) => handleOrderClick(e, item, idx, optionName, "BUY")}
+                                style={{
+                                  flex: 1,
+                                  padding: "8px 12px",
+                                  borderRadius: 6,
+                                  border: "none",
+                                  background: "#22c55e",
+                                  color: "#fff",
+                                  fontWeight: 600,
+                                  fontSize: 13,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                买入
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => handleOrderClick(e, item, idx, optionName, "SELL")}
+                                style={{
+                                  flex: 1,
+                                  padding: "8px 12px",
+                                  borderRadius: 6,
+                                  border: "none",
+                                  background: "#ef4444",
+                                  color: "#fff",
+                                  fontWeight: 600,
+                                  fontSize: 13,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                卖出
+                              </button>
+                            </div>
                           </div>
                         );
                       })}
@@ -791,6 +870,100 @@ function PolymarketApp({ baseUrl }) {
           <div className="pm-empty">当前没有数据，可以先点“同步事件”或“同步市场”。</div>
         )
       ) : null}
+
+      {/* 下单弹窗 */}
+      {orderModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={handleOrderClose}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              padding: 24,
+              minWidth: 320,
+              maxWidth: 400,
+              boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 700 }}>
+              {orderModal.side === "BUY" ? "买入" : "卖出"} - {orderModal.outcomeName}
+            </h3>
+            <div style={{ marginBottom: 12, fontSize: 14, color: "#64748b" }}>
+              市场: {orderModal.play?.question || orderModal.play?.pmMarketId}
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 600, fontSize: 14 }}>
+                金额 (USDC)
+              </label>
+              <input
+                type="number"
+                value={orderAmount}
+                onChange={(e) => setOrderAmount(e.target.value)}
+                placeholder="输入金额"
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #e2e8f0",
+                  fontSize: 16,
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 12 }}>
+              <button
+                type="button"
+                onClick={handleOrderClose}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  borderRadius: 8,
+                  border: "1px solid #e2e8f0",
+                  background: "#fff",
+                  fontWeight: 600,
+                  fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleOrderSubmit}
+                disabled={orderSubmitting || !orderAmount}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: orderModal.side === "BUY" ? "#22c55e" : "#ef4444",
+                  color: "#fff",
+                  fontWeight: 600,
+                  fontSize: 14,
+                  cursor: orderSubmitting || !orderAmount ? "not-allowed" : "pointer",
+                  opacity: orderSubmitting || !orderAmount ? 0.6 : 1,
+                }}
+              >
+                {orderSubmitting ? "提交中..." : "确认"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -84,3 +84,12 @@ export async function syncPolymarketPlays(baseUrl) {
   });
   return { url, data: unwrapData(json) || json };
 }
+
+export async function createPolymarketOrder(baseUrl, orderData) {
+  const { url, json } = await requestJson(baseUrl, "/polymarket/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(orderData),
+  });
+  return { url, data: unwrapData(json) || json };
+}
