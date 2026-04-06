@@ -47,9 +47,10 @@ export async function fetchPolymarketMarkets(baseUrl, pmEventId, category, limit
   return { url, data: unwrapData(json) || [] };
 }
 
-export async function fetchPolymarketPlays(baseUrl, pmEventId, limit = 20, offset = 0) {
-  const suffix = pmEventId ? `&pmEventId=${encodeURIComponent(pmEventId)}` : "";
-  const { url, json } = await requestJson(baseUrl, `/polymarket/plays?offset=${offset}&limit=${limit}${suffix}`);
+export async function fetchPolymarketPlays(baseUrl, pmEventId, limit = 20, offset = 0, pmMarketId = null) {
+  const eventSuffix = pmEventId ? `&pmEventId=${encodeURIComponent(pmEventId)}` : "";
+  const marketSuffix = pmMarketId ? `&pmMarketId=${encodeURIComponent(pmMarketId)}` : "";
+  const { url, json } = await requestJson(baseUrl, `/polymarket/plays?offset=${offset}&limit=${limit}${eventSuffix}${marketSuffix}`);
   return { url, data: unwrapData(json) || [] };
 }
 
