@@ -724,40 +724,23 @@ function PolymarketApp({ baseUrl }) {
                                 }}
                               />
                             </div>
-                            <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+                            <div style={{ marginTop: 12 }}>
                               <button
                                 type="button"
                                 onClick={(e) => handleOrderClick(e, item, idx, optionName, "BUY")}
                                 style={{
-                                  flex: 1,
-                                  padding: "8px 12px",
+                                  width: "100%",
+                                  padding: "10px 12px",
                                   borderRadius: 6,
                                   border: "none",
-                                  background: "#22c55e",
+                                  background: optionName.toLowerCase() === "yes" ? "#22c55e" : "#3b82f6",
                                   color: "#fff",
                                   fontWeight: 600,
-                                  fontSize: 13,
+                                  fontSize: 14,
                                   cursor: "pointer",
                                 }}
                               >
-                                买入
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => handleOrderClick(e, item, idx, optionName, "SELL")}
-                                style={{
-                                  flex: 1,
-                                  padding: "8px 12px",
-                                  borderRadius: 6,
-                                  border: "none",
-                                  background: "#ef4444",
-                                  color: "#fff",
-                                  fontWeight: 600,
-                                  fontSize: 13,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                卖出
+                                买入 {optionName}
                               </button>
                             </div>
                           </div>
@@ -900,7 +883,7 @@ function PolymarketApp({ baseUrl }) {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 700 }}>
-              {orderModal.side === "BUY" ? "买入" : "卖出"} - {orderModal.outcomeName}
+              买入 {orderModal.outcomeName}
             </h3>
             <div style={{ marginBottom: 12, fontSize: 14, color: "#64748b" }}>
               市场: {orderModal.play?.question || orderModal.play?.pmMarketId}
@@ -950,7 +933,7 @@ function PolymarketApp({ baseUrl }) {
                   padding: "12px",
                   borderRadius: 8,
                   border: "none",
-                  background: orderModal.side === "BUY" ? "#22c55e" : "#ef4444",
+                  background: orderModal.outcomeName?.toLowerCase() === "yes" ? "#22c55e" : "#3b82f6",
                   color: "#fff",
                   fontWeight: 600,
                   fontSize: 14,
