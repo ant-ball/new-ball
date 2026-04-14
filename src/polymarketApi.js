@@ -55,8 +55,36 @@ export async function fetchPolymarketPlays(baseUrl, pmEventId, limit = 20, offse
 }
 
 export async function fetchPolymarketPrices(baseUrl, offset = 0, limit = 20) {
-  const { url, json } = await requestJson(baseUrl, `/polymarket/prices?offset=${offset}&limit=${limit}`);
+  let query = `/polymarket/prices?offset=${offset}&limit=${limit}`;
+  if (typeof offset === "object" && offset !== null) {
+    const options = offset;
+    const nextOffset = Number(options.offset ?? 0);
+    const nextLimit = Number(options.limit ?? 20);
+    query = `/polymarket/prices?offset=${nextOffset}&limit=${nextLimit}`;
+    if (options.pmMarketId) {
+      query += `&pmMarketId=${encodeURIComponent(options.pmMarketId)}`;
+    }
+    if (Array.isArray(options.pmMarketIds) && options.pmMarketIds.length > 0) {
+      query += `&pmMarketIds=${encodeURIComponent(options.pmMarketIds.join(","))}`;
+    }
+  }
+  const { url, json } = await requestJson(baseUrl, query);
   return { url, data: unwrapData(json) || [] };
+}
+
+export async function fetchPolymarketGraph(baseUrl, pmMarketId, range = "1h") {
+  const { url, json } = await requestJson(
+    baseUrl,
+    `/polymarket/graph?pmMarketId=${encodeURIComponent(pmMarketId)}&range=${encodeURIComponent(range)}`
+  );
+  return { url, data: unwrapData(json) || {} };
+}
+
+export async function syncPolymarketPrice(baseUrl, pmMarketId) {
+  const { url, json } = await requestJson(baseUrl, `/polymarket/sync/prices?pmMarketId=${encodeURIComponent(pmMarketId)}`, {
+    method: "POST",
+  });
+  return { url, data: unwrapData(json) || json };
 }
 
 export async function fetchPolymarketResults(baseUrl, offset = 0, limit = 20) {
@@ -71,8 +99,9 @@ export async function syncPolymarketEvents(baseUrl) {
   return { url, data: unwrapData(json) || json };
 }
 
-export async function syncPolymarketMarkets(baseUrl) {
-  const { url, json } = await requestJson(baseUrl, "/polymarket/sync/markets?offset=0&limit=200", {
+export async function syncPolymarketMarkets(baseUrl, pmEventId = "") {
+  const suffix = pmEventId ? `?pmEventId=${encodeURIComponent(pmEventId)}` : "?offset=0&limit=200";
+  const { url, json } = await requestJson(baseUrl, `/polymarket/sync/markets${suffix}`, {
     method: "POST",
   });
   return { url, data: unwrapData(json) || json };

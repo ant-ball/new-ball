@@ -50,7 +50,7 @@ function App() {
     };
   }, [baseUrl]);
 
-  const activeLabel = viewMode === 'ball' ? '球盘' : 'Polymarket';
+  const activeLabel = viewMode === 'ball' ? '球盘' : '预测市场';
 
   const refreshBalance = useCallback(async () => {
     try {
@@ -92,7 +92,7 @@ function App() {
             className={viewMode === 'poly' ? 'app-mode-btn active' : 'app-mode-btn'}
             onClick={() => setViewMode('poly')}
           >
-            Polymarket
+            预测市场
           </button>
         </div>
       </header>
