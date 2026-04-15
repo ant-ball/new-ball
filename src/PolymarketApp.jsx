@@ -19,11 +19,9 @@ const PLAYS_PAGE_SIZE = 50;
 const PRICE_STALE_MS = 60 * 1000;
 const PRICE_FALLBACK_CHECK_MS = 15 * 1000;
 const TABS = [
-  { key: "plays", label: "玩法" },
   { key: "markets", label: "市场" },
-  { key: "graph", label: "图表" },
-  { key: "results", label: "结果" },
-  { key: "orders", label: "我的订单" },
+  { key: "orders", label: "当前委托" },
+  { key: "results", label: "历史记录" },
 ];
 const GRAPH_RANGES = [
   { key: "1h", label: "1小时" },
@@ -195,6 +193,86 @@ function formatBeijingTime(value) {
     second: "2-digit",
     hour12: false,
   });
+}
+
+function formatCompactCurrency(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return "";
+  if (num >= 1000000) return `$${(num / 1000000).toFixed(2).replace(/\.?0+$/, "")}M`;
+  if (num >= 1000) return `$${(num / 1000).toFixed(2).replace(/\.?0+$/, "")}K`;
+  return `$${num.toFixed(2).replace(/\.?0+$/, "")}`;
+}
+
+function formatShortDate(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "numeric",
+    day: "numeric",
+  });
+}
+
+function getEventTitle(item) {
+  return translateDynamicText(item?.title || item?.slug || item?.question || item?.description || item?.pmEventId || "预测市场");
+}
+
+function getCardTitle(item) {
+  return translateDynamicText(item?.question || item?.description || item?.title || item?.slug || item?.selectionName || item?.selectionCode || item?.pmMarketId || "预测市场");
+}
+
+function getVolumeValue(item) {
+  const candidates = [
+    item?.volume,
+    item?.volumeUsd,
+    item?.turnover,
+    item?.liquidity,
+    item?.liquidityNum,
+    item?.totalVolume,
+    item?.totalAmount,
+  ];
+  for (const candidate of candidates) {
+    const num = Number(candidate);
+    if (Number.isFinite(num) && num > 0) return num;
+  }
+  return 0;
+}
+
+function getCardMeta(item) {
+  const endValue = item?.endDate || item?.endTime || item?.closeTime || item?.closedAt || item?.resolvedAt;
+  const dateLabel = formatShortDate(endValue);
+  const volumeLabel = formatCompactCurrency(getVolumeValue(item));
+  return {
+    dateLabel,
+    volumeLabel: volumeLabel ? `${volumeLabel} Vol.` : "",
+  };
+}
+
+function getOutcomeRows(item) {
+  const outcomes = parseMaybeJson(item?.outcomesJson);
+  if (Array.isArray(outcomes) && outcomes.length > 0) {
+    return outcomes.slice(0, 4).map((row, idx) => {
+      const rawLabel = typeof row === "object" ? (row?.name || row?.label || row?.outcome || `选项${idx + 1}`) : String(row);
+      return {
+        key: `${item?.pmMarketId || item?.id || "market"}-${idx}`,
+        label: formatOutcomeLabel(rawLabel),
+        rawLabel,
+        outcomeIndex: idx,
+        price: extractOutcomePrice(item, idx),
+      };
+    });
+  }
+  if (item?.selectionName || item?.selectionCode) {
+    return [{
+      key: `${item?.orderNo || item?.id || "order"}-0`,
+      label: formatOutcomeLabel(item.selectionName || item.selectionCode),
+      rawLabel: item.selectionName || item.selectionCode,
+      outcomeIndex: 0,
+      price: item?.orderPrice ?? null,
+    }];
+  }
+  return [];
 }
 
 function getPriceRowTime(priceRow) {
@@ -462,6 +540,7 @@ function PolymarketApp({ baseUrl, balance }) {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
   const [selectedMarketId, setSelectedMarketId] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
   const [socketConnected, setSocketConnected] = useState(false);
   const [lastPriceRefreshAt, setLastPriceRefreshAt] = useState(0);
@@ -764,13 +843,30 @@ function PolymarketApp({ baseUrl, balance }) {
     { label: "玩法", value: visiblePlays.length },
   ]), [categories.length, data.events.length, data.markets.length, visiblePlays.length]);
 
+  const eventList = useMemo(() => {
+    const list = Array.isArray(data.events) ? data.events : [];
+    const keyword = String(searchQuery || "").trim().toLowerCase();
+    if (!keyword) return list;
+    return list.filter((item) => getEventTitle(item).toLowerCase().includes(keyword));
+  }, [data.events, searchQuery]);
+
   const currentList = useMemo(() => {
-    if (activeTab === "markets") return data.markets;
+    if (activeTab === "markets") return deriveDisplayCards(visiblePlays, data.markets);
     if (activeTab === "graph") return [];
     if (activeTab === "results") return resolvedPlays;
     if (activeTab === "orders") return orders;
     return visiblePlays;
   }, [activeTab, data.markets, resolvedPlays, visiblePlays, orders]);
+
+  const filteredCurrentList = useMemo(() => {
+    const keyword = String(searchQuery || "").trim().toLowerCase();
+    if (!keyword) return currentList;
+    return currentList.filter((item) => {
+      const title = getCardTitle(item).toLowerCase();
+      const rows = getOutcomeRows(item).some((row) => String(row.label || "").toLowerCase().includes(keyword));
+      return title.includes(keyword) || rows;
+    });
+  }, [currentList, searchQuery]);
 
   useEffect(() => {
     if (!loading && !error && !["markets", "plays", "graph", "results", "orders"].includes(activeTab)) {
@@ -863,11 +959,9 @@ function PolymarketApp({ baseUrl, balance }) {
 
   const handleMarketClick = useCallback(async (marketId) => {
     if (!marketId || marketId === selectedMarketId) {
-      setActiveTab("plays");
       return;
     }
     setSelectedMarketId(marketId);
-    setActiveTab("plays");
     // 重新请求带 pmMarketId 的 plays,确保能获取到该 market 的玩法
     try {
       const playsRes = await fetchPolymarketPlays(baseUrl, selectedEventId, PLAYS_PAGE_SIZE, 0, marketId);
@@ -960,60 +1054,30 @@ function PolymarketApp({ baseUrl, balance }) {
   }, [activeTab, loadOrders]);
 
   return (
-    <div className="polymarket-shell">
-      <section className="polymarket-hero">
+    <div className="polymarket-shell pm-board-shell">
+      <section className="pm-board-head">
         <div>
-          <h2 className="polymarket-hero-title">预测市场独立视图</h2>
-          <div className="polymarket-hero-desc">
-            先选分类，再选事件，再看市场和玩法。首屏只加载当前路径需要的数据。
+          <h2 className="pm-board-title">所有盘口</h2>
+          <div className="pm-board-subtitle">
+            {selectedCategory ? `${translateCategoryLabel(selectedCategory)} · ${translateDynamicText(selectedEvent?.title || selectedEvent?.slug || "全部事件")}` : "选择分类和事件后查看盘口"}
           </div>
-          <div className="polymarket-hero-desc" style={{ marginTop: 10, opacity: 0.9 }}>
-            实时通道：{socketConnected ? "原生 WS 已连接" : "原生 WS 未连接"}，价格变化会自动刷新。
-          </div>
-          <div className="polymarket-hero-desc" style={{ marginTop: 10, opacity: 0.9 }}>
-            最新价格时间：北京时间 {formatBeijingTime(lastPriceRefreshAt)}
-          </div>
-          {balance && (
-            <div className="polymarket-hero-desc" style={{ marginTop: 10, padding: "8px 12px", background: "#f1f5f9", borderRadius: 6, fontSize: 14 }}>
-              <span style={{ fontWeight: 600 }}>可用余额：{availableBalance.toFixed(2)} USDT</span>
-              <span style={{ marginLeft: 16, opacity: 0.7 }}>总余额：{parseFloat(balance.amount || 0).toFixed(2)}</span>
-              <span style={{ marginLeft: 16, opacity: 0.7 }}>冻结：{parseFloat(balance.froze || 0).toFixed(2)}</span>
-            </div>
-          )}
         </div>
-        <div className="polymarket-actions">
-          <button type="button" className="polymarket-action-btn secondary" onClick={() => handleSync("events")} disabled={refreshing}>
-            同步事件
-          </button>
-          <button type="button" className="polymarket-action-btn secondary" onClick={() => handleSync("markets")} disabled={refreshing}>
-            同步市场
-          </button>
-          <button type="button" className="polymarket-action-btn secondary" onClick={() => handleSync("plays")} disabled={refreshing}>
-            同步玩法
-          </button>
-          <button type="button" className="polymarket-action-btn primary" onClick={() => loadCategoryPath({ category: selectedCategory, eventId: selectedEventId })} disabled={loading || refreshing}>
-            {loading || refreshing ? "刷新中..." : "刷新"}
+        <div className="pm-board-tools">
+          <div className="pm-board-balance">可用余额 {availableBalance.toFixed(2)} USDT</div>
+          <button type="button" className="pm-board-icon" onClick={() => loadCategoryPath({ category: selectedCategory, eventId: selectedEventId })} disabled={loading || refreshing}>
+            {loading || refreshing ? "刷新中" : "刷新"}
           </button>
         </div>
       </section>
 
-      <section className="polymarket-summary">
-        {summary.map((item) => (
-          <div className="pm-stat" key={item.label}>
-            <div className="pm-stat-label">{item.label}</div>
-            <div className="pm-stat-value">{item.value}</div>
-          </div>
-        ))}
-      </section>
-
-      <section className="polymarket-tabs" role="tablist" aria-label="Polymarket 分类">
+      <section className="pm-board-categories" role="tablist" aria-label="分类">
         {categories.map((item) => {
           const category = item?.category || "";
           return (
             <button
               key={category}
               type="button"
-              className={selectedCategory === category ? "polymarket-tab active" : "polymarket-tab"}
+              className={selectedCategory === category ? "pm-board-category active" : "pm-board-category"}
               onClick={() => handleCategoryClick(category)}
             >
               {translateCategoryLabel(category)}
@@ -1022,45 +1086,41 @@ function PolymarketApp({ baseUrl, balance }) {
         })}
       </section>
 
-      <section className="polymarket-event-rail" aria-label="Polymarket 事件列表">
-        {(Array.isArray(data.events) ? data.events : []).map((item) => {
+      <section className="pm-board-search">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pm-board-search-input"
+          placeholder="搜索事件、问题或选项"
+        />
+        <div className="pm-board-search-meta">
+          最新价格：北京时间 {formatBeijingTime(lastPriceRefreshAt)} · {socketConnected ? "WS 已连接" : "WS 未连接"}
+        </div>
+      </section>
+
+      <section className="pm-board-events" aria-label="事件列表">
+        {eventList.map((item) => {
           const eventId = item?.pmEventId || "";
           return (
             <button
               key={eventId}
               type="button"
-              className={selectedEventId === eventId ? "polymarket-event-chip active" : "polymarket-event-chip"}
+              className={selectedEventId === eventId ? "pm-board-event active" : "pm-board-event"}
               onClick={() => handleEventClick(eventId)}
             >
-              <span className="polymarket-event-chip-title">{translateDynamicText(item?.title || item?.slug || eventId)}</span>
-              <span className="polymarket-event-chip-meta">{translateCategoryLabel(item?.category || selectedCategory || "-")} · {formatStatusLabel(item?.status || "ACTIVE")}</span>
+              {getEventTitle(item)}
             </button>
           );
         })}
       </section>
 
-      {selectedCategory ? (
-        <div
-          style={{
-            padding: "10px 14px",
-            borderRadius: 14,
-            background: "rgba(255,255,255,0.72)",
-            border: "1px solid rgba(148,163,184,0.18)",
-            color: "#334155",
-            fontSize: 13,
-            fontWeight: 700,
-          }}
-        >
-          当前路径：{translateCategoryLabel(selectedCategory || "-")} / {translateDynamicText(selectedEvent?.title || selectedEvent?.slug || selectedEventId || "未选择事件")} / {selectedMarketId || "未选择市场"}
-        </div>
-      ) : null}
-
-      <section className="polymarket-tabs" role="tablist" aria-label="Polymarket 标签页">
+      <section className="pm-board-tabs" role="tablist" aria-label="标签页">
         {TABS.map((tab) => (
           <button
             key={tab.key}
             type="button"
-            className={activeTab === tab.key ? "polymarket-tab active" : "polymarket-tab"}
+            className={activeTab === tab.key ? "pm-board-tab active" : "pm-board-tab"}
             onClick={() => setActiveTab(tab.key)}
           >
             {tab.label}
@@ -1069,338 +1129,153 @@ function PolymarketApp({ baseUrl, balance }) {
       </section>
 
       {error ? <div className="pm-empty" style={{ color: "#dc2626" }}>{error}</div> : null}
-      {!error && !loading && !selectedCategory ? (
-        <div className="pm-empty">当前没有已开启的分类，请先在管理后台开启分类。</div>
-      ) : null}
-      {!error && !loading && selectedCategory && selectedEventId && data.markets.length === 0 ? (
+      {!error && !loading && !selectedCategory ? <div className="pm-empty">当前没有已开启的分类。</div> : null}
+      {!error && !loading && selectedCategory && selectedEventId && data.markets.length === 0 && activeTab === "markets" ? (
         <div className="pm-empty">{eventSyncing ? "当前事件市场同步中..." : "当前事件下还没有市场，正在尝试补同步当前事件市场。"}</div>
       ) : null}
-      {!error && !loading && selectedCategory && selectedEventId && activeTab === "plays" && visiblePlays.length === 0 ? (
-        <div className="pm-empty">当前事件下还没有玩法，或者玩法还在同步中。</div>
-      ) : null}
-      {loading ? <div className="pm-empty">正在加载 Polymarket 数据...</div> : null}
+      {loading ? <div className="pm-empty">正在加载数据...</div> : null}
 
-      {!loading && !error && activeTab === "graph" ? (
-        selectedMarketId ? (
-          <section className="pm-graph-card">
-            <div className="pm-graph-head">
-              <div>
-                <h3 className="polymarket-card-title">{translateDynamicText(selectedMarket?.question || selectedMarket?.description || selectedMarket?.pmMarketId || selectedMarketId)}</h3>
-                <div className="polymarket-card-subtitle">
-                  市场：{selectedMarketId} · 区间：{formatGraphRangeLabel(graphRange)} · 最近更新：北京时间 {formatBeijingTime(graphData?.latestUpdateAt)}
-                </div>
-              </div>
-              <div className="pm-graph-range-group">
-                {GRAPH_RANGES.map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    className={graphRange === item.key ? "pm-graph-range active" : "pm-graph-range"}
-                    onClick={() => setGraphRange(item.key)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {graphLoading ? (
-              <div className="pm-empty">图表加载中...</div>
-            ) : Array.isArray(graphData?.series) && graphData.series.length > 0 ? (
-              <div className="pm-graph-wrap">
-                <svg viewBox="0 0 960 320" className="pm-graph-svg" preserveAspectRatio="none">
-                  {graphSvg.labels.map((item, index) => (
-                    <g key={`grid-${index}`}>
-                      <line x1="30" y1={item.y} x2="930" y2={item.y} className="pm-graph-grid" />
-                      <text x="938" y={item.y + 4} className="pm-graph-axis-label">{item.value.toFixed(0)}%</text>
-                    </g>
-                  ))}
-                  {graphSvg.paths.map((path) => (
-                    <g key={path.key}>
-                      <path d={path.d} fill="none" stroke={path.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                      {path.lastPoint ? (
-                        <circle cx={path.lastPoint.x} cy={path.lastPoint.y} r="5" fill={path.color} />
-                      ) : null}
-                    </g>
-                  ))}
-                </svg>
-                <div className="pm-graph-legend">
-                  {graphSvg.paths.map((path) => (
-                    <div className="pm-graph-legend-item" key={`legend-${path.key}`}>
-                      <span className="pm-graph-legend-dot" style={{ background: path.color }} />
-                      <span>{path.outcomeName}</span>
-                      <strong>{path.lastPoint?.raw?.price != null ? formatProbability(path.lastPoint.raw.price) : "-"}</strong>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="pm-empty">当前市场还没有足够的历史价格数据，图表会在后续价格变动后逐步形成。</div>
-            )}
-          </section>
-        ) : (
-          <div className="pm-empty">请先选择一个市场，再查看图表。</div>
-        )
-      ) : null}
-
-      {!loading && !error && (selectedCategory || activeTab === "orders") ? (
-        activeTab !== "graph" && currentList.length ? (
-          <section className="polymarket-grid">
-            {currentList.map((item, index) => {
-              if (activeTab === "plays") {
-                const outcomeNames = parseMaybeJson(item.outcomesJson);
-                const displayName = item.__kind === "market" ? "市场玩法" : translateDynamicText(item.title || item.question || item.pmPlayId || "预测玩法");
-                const outcomeList = Array.isArray(outcomeNames) && outcomeNames.length > 0
-                  ? outcomeNames
-                  : Array.isArray(parseMaybeJson(item.outcomePricesJson)) && parseMaybeJson(item.outcomePricesJson).length > 0
-                    ? parseMaybeJson(item.outcomePricesJson)
-                    : [];
-                const latestUpdateAt = getLatestPriceUpdateAt(item.latestPrices);
-                const closedMarket = isClosedStatus(item.status);
-                return (
-                  <article
-                    className={selectedMarketId === item.pmMarketId ? "polymarket-card selected" : "polymarket-card"}
-                    key={item.pmPlayId || item.id || index}
-                    onClick={() => handleMarketClick(item.pmMarketId)}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <div className="polymarket-card-head">
-                      <div>
-                        <h3 className="polymarket-card-title">{displayName}</h3>
-                        <div className="polymarket-card-subtitle">
-                          分类：{translateCategoryLabel(item.category || selectedCategory || "-")} · 事件：{item.pmEventId || "-"}
-                        </div>
-                        <div className="polymarket-card-subtitle">
-                          Token ID：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
-                        </div>
-                        <div className="polymarket-card-subtitle">
-                          Asset ID：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · 结果：{formatOutcomeLabel(item.resolvedOutcome) || "-"}
-                        </div>
-                        <div className="polymarket-card-subtitle">
-                          最近更新：北京时间 {formatBeijingTime(latestUpdateAt)}
-                        </div>
-                      </div>
-                      <div className={item.status === "RESOLVED" ? "polymarket-pill green" : "polymarket-pill"}>
-                        {formatStatusLabel(item.status || "ACTIVE")}
-                      </div>
-                    </div>
-                    <div className="card-hint">
-                      {closedMarket ? "已关闭，无实时价格。" : item.__kind === "market"
-                        ? "玩法表还没同步完成，当前先用市场数据生成玩法视图。"
-                        : "当前展示的是真实玩法数据，已从玩法表读取。"}
-                    </div>
-                    <div className="pm-options">
-                      {outcomeList.map((name, idx) => {
-                        const price = extractOutcomePrice(item, idx);
-                        const rawOptionName = typeof name === "object" ? (name?.name || name?.label || name?.outcome || `选项${idx + 1}`) : String(name);
-                        const optionName = formatOutcomeLabel(rawOptionName);
-                        return (
-                          <div className="pm-option" key={`${optionName}-${idx}`}>
-                            <div className="pm-option-name">{optionName}</div>
-                            <div className="pm-option-price">
-                              <div>{closedMarket ? "已关闭" : formatPrice(price)}</div>
-                              <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
-                                {closedMarket ? "无实时价格" : `概率 ${formatProbability(price)}`}
-                              </div>
-                            </div>
-                            <div style={{ marginTop: 10, height: 8, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}>
-                              <div
-                                style={{
-                                  width: closedMarket ? "5%" : `${clampPercent(price) || 5}%`,
-                                  height: "100%",
-                                  borderRadius: 999,
-                                  background: "linear-gradient(90deg, #2563eb 0%, #60a5fa 100%)",
-                                }}
-                              />
-                            </div>
-                            <div style={{ marginTop: 12 }}>
-                              <button
-                                type="button"
-                                onClick={(e) => handleOrderClick(e, item, idx, rawOptionName, "BUY")}
-                                disabled={closedMarket}
-                                style={{
-                                  width: "100%",
-                                  padding: "10px 12px",
-                                  borderRadius: 6,
-                                  border: "none",
-                                  background: closedMarket ? "#94a3b8" : (isYesLikeOutcome(rawOptionName) ? "#22c55e" : "#3b82f6"),
-                                  color: "#fff",
-                                  fontWeight: 600,
-                                  fontSize: 14,
-                                  cursor: closedMarket ? "not-allowed" : "pointer",
-                                }}
-                              >
-                                {closedMarket ? "已关闭" : `买入 ${optionName}`}
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {outcomeList.length === 0 ? (
-                        <div className="pm-option">
-                          <div className="pm-option-name">未配置选项</div>
-                          <div className="pm-option-price">-</div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </article>
-                );
-              }
-
-              if (activeTab === "markets") {
-                const prices = Array.isArray(item.latestPrices) && item.latestPrices.length > 0
-                  ? item.latestPrices
-                  : buildLatestPrices(data.prices, item.pmMarketId);
-                const latestUpdateAt = getLatestPriceUpdateAt(prices);
-                const closedMarket = isClosedStatus(item.status);
-                return (
-                  <article
-                    className={selectedMarketId === item.pmMarketId ? "polymarket-card selected" : "polymarket-card"}
-                    key={item.pmMarketId || item.id || index}
-                    onClick={() => handleMarketClick(item.pmMarketId)}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <div className="polymarket-card-head">
-                      <div>
-                        <h3 className="polymarket-card-title">{translateDynamicText(item.question || item.description || item.pmMarketId || "预测市场")}</h3>
-                        <div className="polymarket-card-subtitle">
-                          分类：{translateCategoryLabel(item.category || selectedCategory || "-")} · 事件：{item.pmEventId || "-"}
-                        </div>
-                        <div className="polymarket-card-subtitle">
-                          Token ID：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
-                        </div>
-                        <div className="polymarket-card-subtitle">
-                          Asset ID：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · 条件：{item.conditionId || "-"}
-                        </div>
-                        <div className="polymarket-card-subtitle">
-                          最近更新：北京时间 {formatBeijingTime(latestUpdateAt)}
-                        </div>
-                      </div>
-                      <div className={item.status === "RESOLVED" ? "polymarket-pill green" : "polymarket-pill"}>
-                        {formatStatusLabel(item.status || "ACTIVE")}
-                      </div>
-                    </div>
-                    <div className="card-hint">{closedMarket ? "已关闭，无实时价格。" : "选中一个市场后，玩法列表会自动聚焦到这个市场。"}</div>
-                    <div className="pm-options">
-                      {(Array.isArray(parseMaybeJson(item.outcomesJson)) ? parseMaybeJson(item.outcomesJson) : []).map((name, idx) => {
-                        const priceRow = prices.find((row) => row.pmMarketId === item.pmMarketId && Number(row.outcomeIndex) === Number(idx));
-                        const price = priceRow?.price ?? priceRow?.bestAsk ?? priceRow?.bestBid;
-                        return (
-                          <div className="pm-option" key={`${item.pmMarketId}-${name}-${idx}`}>
-                            <div className="pm-option-name">{formatOutcomeLabel(String(name))}</div>
-                            <div className="pm-option-price">
-                              <div>{closedMarket ? "已关闭" : formatPrice(price)}</div>
-                              <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
-                                {closedMarket ? "无实时价格" : `概率 ${formatProbability(price)}`}
-                              </div>
-                            </div>
-                            <div style={{ marginTop: 10, height: 8, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}>
-                              <div
-                                style={{
-                                  width: closedMarket ? "5%" : `${clampPercent(price) || 5}%`,
-                                  height: "100%",
-                                  borderRadius: 999,
-                                  background: "linear-gradient(90deg, #7c3aed 0%, #a78bfa 100%)",
-                                }}
-                              />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </article>
-                );
-              }
-
-              if (activeTab === "orders") {
-                return (
-                  <article className="polymarket-card" key={item.orderNo || item.id || index}>
-                    <div className="polymarket-card-head">
-                      <div>
-                        <h3 className="polymarket-card-title">{item.selectionName || item.selectionCode || "订单"}</h3>
-                        <div className="polymarket-card-subtitle">
-                          订单号:{item.orderNo || "-"}
-                        </div>
-                        <div className="polymarket-card-subtitle">
-                          市场：{item.pmMarketId || "-"} · 事件：{item.pmEventId || "-"}
-                        </div>
-                        <div className="polymarket-card-subtitle">
-                          下单时间:{formatBeijingTime(item.createdAt)}
-                        </div>
-                      </div>
-                      <div className={`polymarket-pill ${item.settleStatus === "WIN" ? "green" : item.settleStatus === "LOSE" ? "red" : ""}`}>
-                        {formatStatusLabel(item.settleStatus || "OPEN")}
-                      </div>
-                    </div>
-                    <div className="pm-options">
-                      <div className="pm-option">
-                        <div className="pm-option-name">下单金额</div>
-                        <div className="pm-option-price">{item.orderAmount || 0} {item.currency || "USDT"}</div>
-                      </div>
-                      <div className="pm-option">
-                        <div className="pm-option-name">下单概率</div>
-                        <div className="pm-option-price">{item.orderPrice ? (item.orderPrice * 100).toFixed(1) + "%" : "-"}</div>
-                      </div>
-                      <div className="pm-option">
-                        <div className="pm-option-name">潜在收益</div>
-                        <div className="pm-option-price">
-                          {item.orderAmount && item.orderPrice
-                            ? (item.orderAmount / item.orderPrice).toFixed(2) + " " + (item.currency || "USDT")
-                            : "-"}
-                        </div>
-                      </div>
-                      {item.settlePnl != null && (
-                        <div className="pm-option">
-                          <div className="pm-option-name">结算盈亏</div>
-                          <div className="pm-option-price" style={{ color: item.settlePnl > 0 ? "#22c55e" : item.settlePnl < 0 ? "#ef4444" : "inherit" }}>
-                            {item.settlePnl > 0 ? "+" : ""}{item.settlePnl} {item.currency || "USDT"}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </article>
-                );
-              }
-
+      {!loading && !error && filteredCurrentList.length > 0 ? (
+        <section className="pm-board-grid">
+          {filteredCurrentList.map((item, index) => {
+            if (activeTab === "orders") {
               return (
-                <article className="polymarket-card" key={item.pmMarketId || item.marketId || index}>
-                  <div className="polymarket-card-head">
-                    <div>
-                      <h3 className="polymarket-card-title">{item.pmMarketId || item.marketId || "预测结果"}</h3>
-                      <div className="polymarket-card-subtitle">
-                        分类：{translateCategoryLabel(item.category || selectedCategory || "-")} · 事件：{item.pmEventId || "-"}
-                      </div>
-                      <div className="polymarket-card-subtitle">
-                        Token ID：{parseTokenIds(item).length > 0 ? parseTokenIds(item).join(", ") : "-"}
-                      </div>
-                      <div className="polymarket-card-subtitle">
-                        Asset ID：{parseAssetIds(item).length > 0 ? parseAssetIds(item).join(", ") : "-"} · 结算时间：北京时间 {formatBeijingTime(item.resolvedAt)} · 来源：{item.resolutionSource || "-"}
+                <article className="pm-board-card" key={item.orderNo || item.id || index}>
+                  <div className="pm-board-card-top">
+                    <div className="pm-board-card-title-wrap">
+                      <h3 className="pm-board-card-title">{translateDynamicText(item.selectionName || item.selectionCode || "当前委托")}</h3>
+                      <div className="pm-board-card-meta">
+                        {formatBeijingTime(item.createdAt)} · {formatStatusLabel(item.settleStatus || "OPEN")}
                       </div>
                     </div>
-                    <div className="polymarket-pill green">{formatOutcomeLabel(item.resolvedOutcome) || "已结算"}</div>
+                    <div className={`pm-board-status ${String(item.settleStatus || "").toUpperCase() === "WIN" ? "win" : String(item.settleStatus || "").toUpperCase() === "LOSE" ? "lose" : ""}`}>
+                      {formatStatusLabel(item.settleStatus || "OPEN")}
+                    </div>
                   </div>
-                  <div className="pm-options">
-                    <div className="pm-option">
-                      <div className="pm-option-name">结算值</div>
-                      <div className="pm-option-price">{item.resolvedValue || "-"}</div>
+                  <div className="pm-board-order-grid">
+                    <div className="pm-board-order-cell">
+                      <span>下单金额</span>
+                      <strong>{item.orderAmount || 0} {item.currency || "USDT"}</strong>
                     </div>
-                    <div className="pm-option">
-                      <div className="pm-option-name">市场编号</div>
-                      <div className="pm-option-price">{item.pmMarketId || "-"}</div>
+                    <div className="pm-board-order-cell">
+                      <span>下单概率</span>
+                      <strong>{item.orderPrice ? formatProbability(item.orderPrice) : "-"}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>市场</span>
+                      <strong>{item.pmMarketId || "-"}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>结算盈亏</span>
+                      <strong>{item.settlePnl != null ? `${item.settlePnl > 0 ? "+" : ""}${item.settlePnl}` : "-"}</strong>
                     </div>
                   </div>
                 </article>
               );
-            })}
-          </section>
-        ) : activeTab !== "graph" ? (
-          <div className="pm-empty">
-            {activeTab === "orders" 
-              ? (ordersLoading ? "加载订单中..." : "暂无订单记录") 
-              : "当前没有数据，可以先点“同步事件”或“同步市场”。"}
-          </div>
-        ) : null
+            }
+
+            if (activeTab === "results") {
+              return (
+                <article className="pm-board-card" key={item.pmMarketId || item.marketId || index}>
+                  <div className="pm-board-card-top">
+                    <div className="pm-board-card-title-wrap">
+                      <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
+                      <div className="pm-board-card-meta">
+                        北京时间 {formatBeijingTime(item.resolvedAt)} · {translateCategoryLabel(item.category || selectedCategory || "-")}
+                      </div>
+                    </div>
+                    <div className="pm-board-status win">{formatOutcomeLabel(item.resolvedOutcome) || "已结算"}</div>
+                  </div>
+                  <div className="pm-board-order-grid">
+                    <div className="pm-board-order-cell">
+                      <span>结算结果</span>
+                      <strong>{formatOutcomeLabel(item.resolvedOutcome) || "-"}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>结算值</span>
+                      <strong>{item.resolvedValue || "-"}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>市场ID</span>
+                      <strong>{item.pmMarketId || "-"}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>来源</span>
+                      <strong>{item.resolutionSource || "-"}</strong>
+                    </div>
+                  </div>
+                </article>
+              );
+            }
+
+            const prices = Array.isArray(item.latestPrices) && item.latestPrices.length > 0
+              ? item.latestPrices
+              : buildLatestPrices(data.prices, item.pmMarketId);
+            const latestUpdateAt = getLatestPriceUpdateAt(prices);
+            const rows = getOutcomeRows({ ...item, latestPrices: prices });
+            const cardMeta = getCardMeta(item);
+            const closedMarket = isClosedStatus(item.status);
+            return (
+              <article
+                className={selectedMarketId === item.pmMarketId ? "pm-board-card selected" : "pm-board-card"}
+                key={item.pmMarketId || item.id || index}
+                onClick={() => handleMarketClick(item.pmMarketId)}
+                role="button"
+                tabIndex={0}
+              >
+                <div className="pm-board-card-top">
+                  <div className="pm-board-card-title-wrap">
+                    <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
+                    <div className="pm-board-card-meta">
+                      {cardMeta.dateLabel || "长期市场"} {cardMeta.volumeLabel ? `· ${cardMeta.volumeLabel}` : ""} {latestUpdateAt ? `· 更新于 ${formatBeijingTime(latestUpdateAt)}` : ""}
+                    </div>
+                  </div>
+                  <div className={`pm-board-status ${closedMarket ? "closed" : ""}`}>
+                    {formatStatusLabel(item.status || "ACTIVE")}
+                  </div>
+                </div>
+                <div className="pm-board-rows">
+                  {rows.slice(0, 4).map((row) => (
+                    <div className="pm-board-row" key={row.key}>
+                      <div className="pm-board-row-name">{translateDynamicText(row.label)}</div>
+                      <div className="pm-board-row-prob">{closedMarket ? "-" : formatProbability(row.price)}</div>
+                      <div className="pm-board-row-actions">
+                        <button
+                          type="button"
+                          className="pm-board-action yes"
+                          onClick={(e) => handleOrderClick(e, item, row.outcomeIndex, row.rawLabel, "BUY")}
+                          disabled={closedMarket}
+                        >
+                          {formatOutcomeLabel(row.rawLabel)}
+                        </button>
+                        <button
+                          type="button"
+                          className="pm-board-action no"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const fallbackIndex = rows.findIndex((candidate) => String(candidate.rawLabel || "").toLowerCase() === "no");
+                            if (fallbackIndex >= 0) {
+                              handleOrderClick(e, item, rows[fallbackIndex].outcomeIndex, rows[fallbackIndex].rawLabel, "BUY");
+                            }
+                          }}
+                          disabled={closedMarket || String(row.rawLabel || "").toLowerCase() === "no"}
+                        >
+                          否
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            );
+          })}
+        </section>
+      ) : null}
+
+      {!loading && !error && filteredCurrentList.length === 0 ? (
+        <div className="pm-empty">
+          {activeTab === "orders" ? (ordersLoading ? "加载订单中..." : "暂无订单记录") : "当前没有可展示的数据。"}
+        </div>
       ) : null}
 
       {/* 下单弹窗 */}
