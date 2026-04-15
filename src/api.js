@@ -159,6 +159,16 @@ export async function queryTransferWalletTypes({ baseUrl = DEFAULT_BASE_URL } = 
     return { url, data: json };
 }
 
+export async function getUserWallets({ baseUrl = DEFAULT_BASE_URL } = {}) {
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/wallets`;
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`user/wallets 失败 HTTP ${response.status}`);
+    if (json && json.code != null && String(json.code) !== "0") {
+        throw new Error(json.msg || json.message || "user/wallets 返回异常");
+    }
+    return { url, data: json };
+}
+
 export async function queryTransferWalletBalance({ baseUrl = DEFAULT_BASE_URL, walletType } = {}) {
     if (!walletType) throw new Error("walletType 不能为空");
     const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/transfer/balance?walletType=${encodeURIComponent(walletType)}`;
@@ -193,6 +203,26 @@ export async function submitTransfer({
         throw new Error(json.msg || "transfer 失败");
     }
     return { url, data: json };
+}
+
+export async function checkUserTransfer({ baseUrl = DEFAULT_BASE_URL } = {}) {
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/transfer/check`;
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`user/transfer/check 失败 HTTP ${response.status}`);
+    if (json && json.code != null && String(json.code) !== "0") {
+        throw new Error(json.msg || json.message || "划转校验失败");
+    }
+    return { url, data: json };
+}
+
+export async function submitUserTransfer({ baseUrl = DEFAULT_BASE_URL, payload } = {}) {
+    return submitTransfer({
+        baseUrl,
+        fromWalletType: payload?.fromWalletType,
+        toWalletType: payload?.toWalletType,
+        coinType: payload?.coinType,
+        amount: payload?.amount,
+    });
 }
 
 export async function getBet365All({
