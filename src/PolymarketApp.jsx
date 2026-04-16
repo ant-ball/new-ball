@@ -66,6 +66,20 @@ function formatStatusLabel(status) {
   return status;
 }
 
+function resolveSettlementDate(order) {
+  if (!order || typeof order !== "object") return null;
+  if (order.settledAt) return order.settledAt;
+  if (order.marketResolvedAt) return order.marketResolvedAt;
+  if (order.eventEndTime) return order.eventEndTime;
+  return null;
+}
+
+function formatSettlementDateLabel(order) {
+  const value = resolveSettlementDate(order);
+  if (!value) return "-";
+  return formatBeijingTime(value);
+}
+
 function formatOutcomeLabel(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "yes") return "是";
@@ -1152,7 +1166,7 @@ function PolymarketApp({ baseUrl, balance }) {
                       {formatStatusLabel(item.settleStatus || "OPEN")}
                     </div>
                   </div>
-                  <div className="pm-board-order-grid">
+                    <div className="pm-board-order-grid">
                     <div className="pm-board-order-cell">
                       <span>下单金额</span>
                       <strong>{item.orderAmount || 0} {item.currency || "USDT"}</strong>
@@ -1161,15 +1175,19 @@ function PolymarketApp({ baseUrl, balance }) {
                       <span>下单概率</span>
                       <strong>{item.orderPrice ? formatProbability(item.orderPrice) : "-"}</strong>
                     </div>
-                    <div className="pm-board-order-cell">
-                      <span>市场</span>
-                      <strong>{item.pmMarketId || "-"}</strong>
+                      <div className="pm-board-order-cell">
+                        <span>市场</span>
+                        <strong>{item.pmMarketId || "-"}</strong>
+                      </div>
+                      <div className="pm-board-order-cell">
+                        <span>{String(item.settleStatus || "").toUpperCase() === "SETTLED" || String(item.settleStatus || "").toUpperCase() === "WIN" || String(item.settleStatus || "").toUpperCase() === "LOSE" ? "结算时间" : "预计结算"}</span>
+                        <strong>{formatSettlementDateLabel(item)}</strong>
+                      </div>
+                      <div className="pm-board-order-cell">
+                        <span>结算盈亏</span>
+                        <strong>{item.settlePnl != null ? `${item.settlePnl > 0 ? "+" : ""}${item.settlePnl}` : "-"}</strong>
+                      </div>
                     </div>
-                    <div className="pm-board-order-cell">
-                      <span>结算盈亏</span>
-                      <strong>{item.settlePnl != null ? `${item.settlePnl > 0 ? "+" : ""}${item.settlePnl}` : "-"}</strong>
-                    </div>
-                  </div>
                 </article>
               );
             }
