@@ -617,7 +617,6 @@ function PolymarketApp({ baseUrl, balance }) {
   const [error, setError] = useState("");
   const [socketConnected, setSocketConnected] = useState(false);
   const [lastPriceRefreshAt, setLastPriceRefreshAt] = useState(0);
-  const [eventSyncing, setEventSyncing] = useState(false);
   const [graphRange, setGraphRange] = useState("1h");
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphData, setGraphData] = useState(null);
@@ -997,31 +996,6 @@ function PolymarketApp({ baseUrl, balance }) {
     loadSelectedEvent(eventId, selectedCategory);
   }, [loadSelectedEvent, selectedCategory, selectedEventId]);
 
-  const syncCurrentEventMarkets = useCallback(async () => {
-    if (!selectedEventId || eventSyncing) {
-      return;
-    }
-    setEventSyncing(true);
-    setError("");
-    try {
-      await syncPolymarketMarkets(baseUrl, selectedEventId);
-      await loadSelectedEvent(selectedEventId, selectedCategory);
-    } catch (err) {
-      setError(err?.message || "当前事件市场同步失败");
-    } finally {
-      setEventSyncing(false);
-    }
-  }, [baseUrl, eventSyncing, loadSelectedEvent, selectedCategory, selectedEventId]);
-
-  useEffect(() => {
-    if (loading || eventSyncing || !selectedEventId) {
-      return;
-    }
-    if (data.markets.length === 0) {
-      syncCurrentEventMarkets();
-    }
-  }, [data.markets.length, eventSyncing, loading, selectedEventId, syncCurrentEventMarkets]);
-
   const handleMarketClick = useCallback(async (marketId) => {
     if (!marketId || marketId === selectedMarketId) {
       return;
@@ -1196,7 +1170,7 @@ function PolymarketApp({ baseUrl, balance }) {
       {error ? <div className="pm-empty" style={{ color: "#dc2626" }}>{error}</div> : null}
       {!error && !loading && !selectedCategory ? <div className="pm-empty">当前没有已开启的分类。</div> : null}
       {!error && !loading && selectedCategory && selectedEventId && data.markets.length === 0 && activeTab === "markets" ? (
-        <div className="pm-empty">{eventSyncing ? "当前事件市场同步中..." : "当前事件下还没有市场，正在尝试补同步当前事件市场。"}</div>
+        <div className="pm-empty">当前事件下还没有可展示的市场数据。</div>
       ) : null}
       {loading ? <div className="pm-empty">正在加载数据...</div> : null}
 
