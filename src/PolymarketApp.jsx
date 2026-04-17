@@ -810,32 +810,17 @@ function PolymarketApp({ baseUrl, balance }) {
         if (cancelled) return;
         const eventRows = Array.isArray(eventsRes.data) ? eventsRes.data : [];
         const initialEventId = pickInitialEventId(eventRows, "");
-        let markets = [];
-        let plays = [];
-        if (initialEventId) {
-          const [marketsRes, playsRes] = await Promise.all([
-            fetchPolymarketMarkets(baseUrl, initialEventId, "", PAGE_SIZE, 0),
-            fetchPolymarketPlays(baseUrl, initialEventId, PLAYS_PAGE_SIZE, 0),
-          ]);
-          markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
-          plays = Array.isArray(playsRes.data) ? playsRes.data : [];
-        }
-        if (cancelled) return;
-        const priceRows = plays.flatMap((item) => (Array.isArray(item?.latestPrices) ? item.latestPrices : []));
-        const latestPriceAt = getLatestPriceUpdateAt(priceRows);
-        lastPriceUpdateRef.current = latestPriceAt;
-        setLastPriceRefreshAt(latestPriceAt);
         setSelectedCategory(initialCategory);
         setSelectedEventId(initialEventId);
-        setSelectedMarketId(markets.find((item) => item && item.pmMarketId)?.pmMarketId || "");
         setData({
           categories: categoryRows,
           events: eventRows,
-          markets: markets.map((item) => ({ ...item, latestPrices: buildLatestPrices(priceRows, item.pmMarketId) })),
-          plays: plays.map((item) => ({ ...item, latestPrices: buildLatestPrices(priceRows, item.pmMarketId) })),
-          prices: priceRows,
+          markets: [],
+          plays: [],
+          prices: [],
           results: [],
         });
+        setSelectedMarketId("");
       } catch (err) {
         if (!cancelled) {
           setError(err?.message || "Polymarket 加载失败");
@@ -850,6 +835,13 @@ function PolymarketApp({ baseUrl, balance }) {
       cancelled = true;
     };
   }, [baseUrl, loadCategories]);
+
+  useEffect(() => {
+    if (loading || !selectedEventId) {
+      return;
+    }
+    loadSelectedEvent(selectedEventId, selectedCategory);
+  }, [loadSelectedEvent, loading, selectedCategory, selectedEventId]);
 
   const { connected: wsConnected, subscribeEvent } = usePolymarketSocket({
     baseUrl,
