@@ -63,18 +63,18 @@ const CATEGORY_LABELS = {
 };
 
 const CATEGORY_GROUPS = [
-  { key: "global", label: "全球", sources: ["world", "global gdp", "global"] },
+  { key: "global", label: "全球", sources: ["global"] },
   { key: "sports", label: "体育", sources: ["sports"] },
-  { key: "trump", label: "川普", sources: ["trump presidency", "trump"] },
+  { key: "trump", label: "川普", sources: ["trump"] },
   { key: "crypto", label: "加密", sources: ["crypto"] },
-  { key: "commodities", label: "大宗商品", sources: ["commodities", "commodity"] },
-  { key: "esports", label: "电竞", sources: ["esports", "gaming", "e-sports"] },
-  { key: "iran", label: "伊朗", sources: ["iran", "middle east", "u.s. x iran", "israel x iran"] },
-  { key: "finance", label: "财经", sources: ["finance", "business"] },
-  { key: "technology", label: "科技", sources: ["technology", "tech", "chatgpt"] },
+  { key: "commodities", label: "大宗商品", sources: ["commodities"] },
+  { key: "esports", label: "电竞", sources: ["esports"] },
+  { key: "iran", label: "伊朗", sources: ["iran"] },
+  { key: "finance", label: "财经", sources: ["finance"] },
+  { key: "technology", label: "科技", sources: ["technology"] },
   { key: "culture", label: "文化", sources: ["culture"] },
   { key: "economy", label: "经济", sources: ["economy"] },
-  { key: "climate", label: "气候", sources: ["weather", "climate"] },
+  { key: "climate", label: "气候", sources: ["climate"] },
   { key: "world cup", label: "世界杯", sources: ["world cup"] },
 ];
 
