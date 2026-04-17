@@ -14,8 +14,8 @@ import {
 } from "./polymarketApi";
 import { usePolymarketSocket } from "./usePolymarketSocket";
 
-const PAGE_SIZE = 20;
-const PLAYS_PAGE_SIZE = 50;
+const PAGE_SIZE = 80;
+const PLAYS_PAGE_SIZE = 100;
 const PRICE_STALE_MS = 60 * 1000;
 const PRICE_FALLBACK_CHECK_MS = 15 * 1000;
 const TABS = [
@@ -34,6 +34,7 @@ const GRAPH_RANGES = [
 const GRAPH_COLORS = ["#f97316", "#dc2626", "#2563eb", "#16a34a", "#7c3aed", "#0f766e"];
 
 const CATEGORY_LABELS = {
+  global: "全球",
   business: "商业",
   chatgpt: "ChatGPT",
   crypto: "加密",
@@ -51,7 +52,31 @@ const CATEGORY_LABELS = {
   tennis: "网球",
   economy: "经济",
   elections: "选举",
+  trump: "川普",
+  commodities: "大宗商品",
+  esports: "电竞",
+  iran: "伊朗",
+  finance: "财经",
+  technology: "科技",
+  culture: "文化",
+  climate: "气候",
 };
+
+const CATEGORY_GROUPS = [
+  { key: "global", label: "全球", sources: ["world", "global gdp", "global"] },
+  { key: "sports", label: "体育", sources: ["sports"] },
+  { key: "trump", label: "川普", sources: ["trump presidency", "trump"] },
+  { key: "crypto", label: "加密", sources: ["crypto"] },
+  { key: "commodities", label: "大宗商品", sources: ["commodities", "commodity"] },
+  { key: "esports", label: "电竞", sources: ["esports", "gaming", "e-sports"] },
+  { key: "iran", label: "伊朗", sources: ["iran", "middle east", "u.s. x iran", "israel x iran"] },
+  { key: "finance", label: "财经", sources: ["finance", "business"] },
+  { key: "technology", label: "科技", sources: ["technology", "tech", "chatgpt"] },
+  { key: "culture", label: "文化", sources: ["culture"] },
+  { key: "economy", label: "经济", sources: ["economy"] },
+  { key: "climate", label: "气候", sources: ["weather", "climate"] },
+  { key: "world cup", label: "世界杯", sources: ["world cup"] },
+];
 
 function formatStatusLabel(status) {
   const normalized = String(status || "").trim().toUpperCase();
@@ -98,6 +123,18 @@ function translateCategoryLabel(value) {
   const raw = String(value || "").trim();
   if (!raw) return raw;
   return CATEGORY_LABELS[raw.toLowerCase()] || raw;
+}
+
+function getCategoryGroup(tabKey) {
+  return CATEGORY_GROUPS.find((item) => item.key === tabKey) || null;
+}
+
+function buildVisibleCategoryTabs() {
+  return CATEGORY_GROUPS.map((item) => ({
+    category: item.key,
+    label: item.label,
+    sources: item.sources,
+  }));
 }
 
 function translateDynamicText(value) {
@@ -497,6 +534,28 @@ function pickInitialCategory(categoryRows, requestedCategory = "") {
   return enabledCategories[0] || "";
 }
 
+async function fetchEventsForCategoryTab(baseUrl, tabKey, limit = PAGE_SIZE) {
+  const group = getCategoryGroup(tabKey);
+  const sources = Array.isArray(group?.sources) ? group.sources : [];
+  if (sources.length === 0) {
+    return [];
+  }
+  const results = await Promise.all(
+    sources.map((category) => fetchPolymarketEvents(baseUrl, category, limit, 0).catch(() => ({ data: [] })))
+  );
+  const mergedMap = new Map();
+  results.forEach((response) => {
+    const rows = Array.isArray(response?.data) ? response.data : [];
+    rows.forEach((row) => {
+      if (!row?.pmEventId) return;
+      if (!mergedMap.has(row.pmEventId)) {
+        mergedMap.set(row.pmEventId, row);
+      }
+    });
+  });
+  return Array.from(mergedMap.values()).sort((left, right) => Number(right?.priceCount || 0) - Number(left?.priceCount || 0));
+}
+
 function pickInitialEventId(eventRows, preferredEventId = "") {
   const list = Array.isArray(eventRows) ? eventRows : [];
   if (preferredEventId && list.some((item) => item && item.pmEventId === preferredEventId)) {
@@ -577,8 +636,8 @@ function PolymarketApp({ baseUrl, balance }) {
   });
 
   const loadCategories = useCallback(async () => {
-    const categoriesRes = await fetchPolymarketCategories(baseUrl);
-    return Array.isArray(categoriesRes.data) ? categoriesRes.data : [];
+    await fetchPolymarketCategories(baseUrl);
+    return buildVisibleCategoryTabs();
   }, [baseUrl]);
 
   const loadCategoryPath = useCallback(async ({ category = "", eventId = "" } = {}) => {
@@ -588,7 +647,7 @@ function PolymarketApp({ baseUrl, balance }) {
       const categoryRows = categories.length > 0 ? categories : await loadCategories();
       const resolvedCategory = category || pickInitialCategory(categoryRows, "");
       const eventsRes = resolvedCategory
-        ? await fetchPolymarketEvents(baseUrl, resolvedCategory, PAGE_SIZE, 0)
+        ? { data: await fetchEventsForCategoryTab(baseUrl, resolvedCategory, PAGE_SIZE) }
         : { data: [] };
       const eventRows = Array.isArray(eventsRes.data) ? eventsRes.data : [];
       const resolvedEventId = eventId || pickInitialEventId(eventRows, "");
@@ -596,7 +655,7 @@ function PolymarketApp({ baseUrl, balance }) {
       let plays = [];
       if (resolvedEventId) {
         const [marketsRes, playsRes] = await Promise.all([
-          fetchPolymarketMarkets(baseUrl, resolvedEventId, resolvedCategory, PAGE_SIZE, 0),
+          fetchPolymarketMarkets(baseUrl, resolvedEventId, "", PAGE_SIZE, 0),
           fetchPolymarketPlays(baseUrl, resolvedEventId, PLAYS_PAGE_SIZE, 0),
         ]);
         markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
@@ -645,7 +704,7 @@ function PolymarketApp({ baseUrl, balance }) {
     setError("");
     try {
       const [marketsRes, playsRes] = await Promise.all([
-        fetchPolymarketMarkets(baseUrl, nextEventId, nextCategory, PAGE_SIZE, 0),
+        fetchPolymarketMarkets(baseUrl, nextEventId, "", PAGE_SIZE, 0),
         fetchPolymarketPlays(baseUrl, nextEventId, PLAYS_PAGE_SIZE, 0),
       ]);
       const markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
@@ -747,7 +806,7 @@ function PolymarketApp({ baseUrl, balance }) {
           setLoading(false);
           return;
         }
-        const eventsRes = await fetchPolymarketEvents(baseUrl, initialCategory, PAGE_SIZE, 0);
+        const eventsRes = { data: await fetchEventsForCategoryTab(baseUrl, initialCategory, PAGE_SIZE) };
         if (cancelled) return;
         const eventRows = Array.isArray(eventsRes.data) ? eventsRes.data : [];
         const initialEventId = pickInitialEventId(eventRows, "");
@@ -755,7 +814,7 @@ function PolymarketApp({ baseUrl, balance }) {
         let plays = [];
         if (initialEventId) {
           const [marketsRes, playsRes] = await Promise.all([
-            fetchPolymarketMarkets(baseUrl, initialEventId, initialCategory, PAGE_SIZE, 0),
+            fetchPolymarketMarkets(baseUrl, initialEventId, "", PAGE_SIZE, 0),
             fetchPolymarketPlays(baseUrl, initialEventId, PLAYS_PAGE_SIZE, 0),
           ]);
           markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
@@ -1094,7 +1153,7 @@ function PolymarketApp({ baseUrl, balance }) {
               className={selectedCategory === category ? "pm-board-category active" : "pm-board-category"}
               onClick={() => handleCategoryClick(category)}
             >
-              {translateCategoryLabel(category)}
+              {item?.label || translateCategoryLabel(category)}
             </button>
           );
         })}
@@ -1245,7 +1304,7 @@ function PolymarketApp({ baseUrl, balance }) {
                   <div className="pm-board-card-title-wrap">
                     <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
                     <div className="pm-board-card-meta">
-                      {cardMeta.dateLabel || "长期市场"} {cardMeta.volumeLabel ? `· ${cardMeta.volumeLabel}` : ""} {latestUpdateAt ? `· 更新于 ${formatBeijingTime(latestUpdateAt)}` : ""}
+                      {cardMeta.volumeLabel ? `交易额 ${cardMeta.volumeLabel}` : "交易额 -"} {cardMeta.dateLabel ? `· ${cardMeta.dateLabel}` : ""} {latestUpdateAt ? `· 更新于 ${formatBeijingTime(latestUpdateAt)}` : ""}
                     </div>
                   </div>
                   <div className={`pm-board-status ${closedMarket ? "closed" : ""}`}>
