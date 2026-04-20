@@ -106,8 +106,20 @@ export async function createContactOrder({ baseUrl = DEFAULT_BASE_URL, betOrderL
     return { url, data: json };
 }
 
-export async function getOrderList({ baseUrl = DEFAULT_BASE_URL, type = 0, page = 1, size = 20, day } = {}) {
-    const q = buildQuery({ type, page, size, day });
+export async function getOrderList({
+    baseUrl = DEFAULT_BASE_URL,
+    type = 0,
+    page = 1,
+    size = 20,
+    day,
+    timeType,
+    settlementState,
+    settlementResult,
+    keyword,
+    start,
+    end,
+} = {}) {
+    const q = buildQuery({ type, page, size, day, timeType, settlementState, settlementResult, keyword, start, end });
     const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/list?${q}`;
     const { response, json } = await requestJson(url);
     if (!response.ok) throw new Error(`order/list 失败 HTTP ${response.status}`);
@@ -131,6 +143,8 @@ export async function getUserBalance({ baseUrl = DEFAULT_BASE_URL } = {}) {
 export async function getUserBalanceBills({
     baseUrl = DEFAULT_BASE_URL,
     id,
+    page,
+    size,
     direction = "NEXT",
     limit = 10,
     coin,
@@ -139,7 +153,7 @@ export async function getUserBalanceBills({
     startTime,
     endTime,
 } = {}) {
-    const q = buildQuery({ id, direction, limit, coin, symbol, type, startTime, endTime });
+    const q = buildQuery({ id, page, size, direction, limit, coin, symbol, type, startTime, endTime });
     const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/user/balance/bills${q ? `?${q}` : ""}`;
     const { response, json } = await requestJson(url);
     if (!response.ok) throw new Error(`balance/bills 失败 HTTP ${response.status}`);
