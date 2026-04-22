@@ -30,37 +30,60 @@ function unwrapData(json) {
   return json;
 }
 
+function unwrapPageRows(json) {
+  const payload = unwrapData(json);
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object") return [];
+  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(payload.list)) return payload.list;
+  if (Array.isArray(payload.items)) return payload.items;
+  return [];
+}
+
+function unwrapPageMeta(json) {
+  const payload = unwrapData(json);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { page: 1, size: 0, total: 0 };
+  }
+  const pageRequest = payload.pageRequest && typeof payload.pageRequest === "object" ? payload.pageRequest : {};
+  return {
+    page: Number(payload.page ?? pageRequest.page ?? 1) || 1,
+    size: Number(payload.size ?? payload.limit ?? pageRequest.size ?? 0) || 0,
+    total: Number(payload.total ?? 0) || 0,
+  };
+}
+
 export async function fetchPolymarketCategories(baseUrl) {
-  const { url, json } = await requestJson(baseUrl, "/polymarket/categories");
-  return { url, data: unwrapData(json) || [] };
+  const { url, json } = await requestJson(baseUrl, "/polymarket/categories?page=1&size=50");
+  return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
 }
 
-export async function fetchPolymarketEvents(baseUrl, category, limit = 20, offset = 0) {
+export async function fetchPolymarketEvents(baseUrl, category, page = 1, size = 20) {
   const suffix = category ? `&category=${encodeURIComponent(category)}` : "";
-  const { url, json } = await requestJson(baseUrl, `/polymarket/events?offset=${offset}&limit=${limit}${suffix}`);
-  return { url, data: unwrapData(json) || [] };
+  const { url, json } = await requestJson(baseUrl, `/polymarket/events?page=${page}&size=${size}${suffix}`);
+  return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
 }
 
-export async function fetchPolymarketMarkets(baseUrl, pmEventId, category, limit = 20, offset = 0) {
-  const suffix = `${pmEventId ? `&pmEventId=${encodeURIComponent(pmEventId)}` : ""}${category ? `&category=${encodeURIComponent(category)}` : ""}`;
-  const { url, json } = await requestJson(baseUrl, `/polymarket/markets?offset=${offset}&limit=${limit}${suffix}`);
-  return { url, data: unwrapData(json) || [] };
+export async function fetchPolymarketMarkets(baseUrl, { pmEventId = "", category = "", page = 1, size = 20, keyword = "" } = {}) {
+  const suffix = `${pmEventId ? `&pmEventId=${encodeURIComponent(pmEventId)}` : ""}${category ? `&category=${encodeURIComponent(category)}` : ""}${keyword ? `&keyword=${encodeURIComponent(keyword)}` : ""}`;
+  const { url, json } = await requestJson(baseUrl, `/polymarket/markets?page=${page}&size=${size}${suffix}`);
+  return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
 }
 
-export async function fetchPolymarketPlays(baseUrl, pmEventId, limit = 20, offset = 0, pmMarketId = null) {
+export async function fetchPolymarketPlays(baseUrl, pmEventId, page = 1, size = 20, pmMarketId = null) {
   const eventSuffix = pmEventId ? `&pmEventId=${encodeURIComponent(pmEventId)}` : "";
   const marketSuffix = pmMarketId ? `&pmMarketId=${encodeURIComponent(pmMarketId)}` : "";
-  const { url, json } = await requestJson(baseUrl, `/polymarket/plays?offset=${offset}&limit=${limit}${eventSuffix}${marketSuffix}`);
-  return { url, data: unwrapData(json) || [] };
+  const { url, json } = await requestJson(baseUrl, `/polymarket/plays?page=${page}&size=${size}${eventSuffix}${marketSuffix}`);
+  return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
 }
 
-export async function fetchPolymarketPrices(baseUrl, offset = 0, limit = 20) {
-  let query = `/polymarket/prices?offset=${offset}&limit=${limit}`;
-  if (typeof offset === "object" && offset !== null) {
-    const options = offset;
-    const nextOffset = Number(options.offset ?? 0);
-    const nextLimit = Number(options.limit ?? 20);
-    query = `/polymarket/prices?offset=${nextOffset}&limit=${nextLimit}`;
+export async function fetchPolymarketPrices(baseUrl, page = 1, size = 20) {
+  let query = `/polymarket/prices?page=${page}&size=${size}`;
+  if (typeof page === "object" && page !== null) {
+    const options = page;
+    const nextPage = Number(options.page ?? 1);
+    const nextSize = Number(options.size ?? 20);
+    query = `/polymarket/prices?page=${nextPage}&size=${nextSize}`;
     if (options.pmMarketId) {
       query += `&pmMarketId=${encodeURIComponent(options.pmMarketId)}`;
     }
@@ -69,7 +92,7 @@ export async function fetchPolymarketPrices(baseUrl, offset = 0, limit = 20) {
     }
   }
   const { url, json } = await requestJson(baseUrl, query);
-  return { url, data: unwrapData(json) || [] };
+  return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
 }
 
 export async function fetchPolymarketGraph(baseUrl, pmMarketId, range = "1h") {
@@ -87,9 +110,9 @@ export async function syncPolymarketPrice(baseUrl, pmMarketId) {
   return { url, data: unwrapData(json) || json };
 }
 
-export async function fetchPolymarketResults(baseUrl, offset = 0, limit = 20) {
-  const { url, json } = await requestJson(baseUrl, `/polymarket/results?offset=${offset}&limit=${limit}`);
-  return { url, data: unwrapData(json) || [] };
+export async function fetchPolymarketResults(baseUrl, page = 1, size = 20) {
+  const { url, json } = await requestJson(baseUrl, `/polymarket/results?page=${page}&size=${size}`);
+  return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
 }
 
 export async function syncPolymarketEvents(baseUrl) {
@@ -123,7 +146,7 @@ export async function createPolymarketOrder(baseUrl, orderData) {
   return { url, data: unwrapData(json) || json };
 }
 
-export async function fetchPolymarketOrders(baseUrl, offset = 0, limit = 50) {
-  const { url, json } = await requestJson(baseUrl, `/polymarket/orders?offset=${offset}&limit=${limit}`);
-  return { url, data: unwrapData(json) || [] };
+export async function fetchPolymarketOrders(baseUrl, page = 1, size = 50) {
+  const { url, json } = await requestJson(baseUrl, `/polymarket/orders?page=${page}&size=${size}`);
+  return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
 }

@@ -770,6 +770,29 @@
   font-weight: 900;
 }
 
+.pm-board-pagination {
+  display: flex;
+  justify-content: center;
+}
+
+.pm-board-load-more {
+  appearance: none;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.92);
+  color: #0f172a;
+  border-radius: 999px;
+  padding: 12px 20px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.pm-board-load-more:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 @media (max-width: 1024px) {
   .app-topbar,
   .app-statusbar,

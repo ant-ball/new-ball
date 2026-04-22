@@ -1,21 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchPolymarketCategories,
-  fetchPolymarketEvents,
   fetchPolymarketMarkets,
-  fetchPolymarketPlays,
   fetchPolymarketGraph,
-  syncPolymarketEvents,
-  syncPolymarketMarkets,
-  syncPolymarketPlays,
   syncPolymarketPrice,
   createPolymarketOrder,
   fetchPolymarketOrders,
+  fetchPolymarketResults,
 } from "./polymarketApi";
 import { usePolymarketSocket } from "./usePolymarketSocket";
 
-const PAGE_SIZE = 80;
-const PLAYS_PAGE_SIZE = 100;
+const PAGE_SIZE = 20;
+const ORDER_PAGE_SIZE = 20;
+const RESULT_PAGE_SIZE = 20;
 const PRICE_STALE_MS = 60 * 1000;
 const PRICE_FALLBACK_CHECK_MS = 15 * 1000;
 const TABS = [
@@ -541,7 +538,7 @@ async function fetchEventsForCategoryTab(baseUrl, tabKey, limit = PAGE_SIZE) {
     return [];
   }
   const results = await Promise.all(
-    sources.map((category) => fetchPolymarketEvents(baseUrl, category, limit, 0).catch(() => ({ data: [] })))
+    sources.map((category) => fetchPolymarketEvents(baseUrl, category, 1, limit).catch(() => ({ data: [] })))
   );
   const mergedMap = new Map();
   results.forEach((response) => {
@@ -562,6 +559,32 @@ function pickInitialEventId(eventRows, preferredEventId = "") {
     return preferredEventId;
   }
   return list.length > 0 ? (list[0]?.pmEventId || "") : "";
+}
+
+async function findFirstCategoryWithMarkets(baseUrl, categoryRows, preferredCategory = "") {
+  const orderedCategories = [];
+  const pushCategory = (value) => {
+    const category = String(value || "").trim();
+    if (!category || orderedCategories.includes(category)) {
+      return;
+    }
+    orderedCategories.push(category);
+  };
+  pushCategory(preferredCategory);
+  (Array.isArray(categoryRows) ? categoryRows : []).forEach((item) => pushCategory(item?.category));
+
+  for (const category of orderedCategories) {
+    try {
+      const response = await fetchPolymarketMarkets(baseUrl, { category, page: 1, size: 1 });
+      const rows = Array.isArray(response?.data) ? response.data : [];
+      if (rows.length > 0) {
+        return category;
+      }
+    } catch {
+      // Ignore probe failures and continue to the next category.
+    }
+  }
+  return preferredCategory || orderedCategories[0] || "";
 }
 
 function attachLatestPricesToMarkets(markets, plays) {
@@ -607,11 +630,9 @@ function PolymarketApp({ baseUrl, balance }) {
   const lastPriceUpdateRef = useRef(0);
   const staleRefreshInFlightRef = useRef(false);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("markets");
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
-  const [selectedEventId, setSelectedEventId] = useState("");
   const [selectedMarketId, setSelectedMarketId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
@@ -625,108 +646,125 @@ function PolymarketApp({ baseUrl, balance }) {
   const [orderSubmitting, setOrderSubmitting] = useState(false);
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersPage, setOrdersPage] = useState(1);
+  const [ordersHasMore, setOrdersHasMore] = useState(false);
+  const [resultsLoading, setResultsLoading] = useState(false);
+  const [resultsPage, setResultsPage] = useState(1);
+  const [resultsHasMore, setResultsHasMore] = useState(false);
+  const [marketPage, setMarketPage] = useState(1);
+  const [marketHasMore, setMarketHasMore] = useState(false);
+  const [loadingMoreMarkets, setLoadingMoreMarkets] = useState(false);
   const [data, setData] = useState({
     categories: [],
-    events: [],
     markets: [],
-    plays: [],
     prices: [],
     results: [],
   });
 
   const loadCategories = useCallback(async () => {
-    await fetchPolymarketCategories(baseUrl);
-    return buildVisibleCategoryTabs();
+    const response = await fetchPolymarketCategories(baseUrl);
+    const remoteRows = Array.isArray(response?.data) ? response.data : [];
+    if (remoteRows.length === 0) {
+      return buildVisibleCategoryTabs();
+    }
+    const enabledMap = new Map();
+    remoteRows.forEach((item) => {
+      const category = String(item?.category || "").trim();
+      if (!category) return;
+      enabledMap.set(category, {
+        category,
+        label: translateCategoryLabel(category),
+      });
+    });
+    return buildVisibleCategoryTabs().filter((item) => enabledMap.has(item.category));
   }, [baseUrl]);
 
-  const loadCategoryPath = useCallback(async ({ category = "", eventId = "" } = {}) => {
-    setLoading(true);
+  const hydrateMarkets = useCallback((marketRows, append = false) => {
+    const nextMarkets = Array.isArray(marketRows) ? marketRows : [];
+    const priceRows = nextMarkets.flatMap((item) => (Array.isArray(item?.latestPrices) ? item.latestPrices : []));
+    const latestPriceAt = getLatestPriceUpdateAt(priceRows);
+    if (latestPriceAt > 0) {
+      lastPriceUpdateRef.current = latestPriceAt;
+      setLastPriceRefreshAt(latestPriceAt);
+    }
+    setData((prev) => {
+      const mergedMarkets = append
+        ? [
+            ...prev.markets,
+            ...nextMarkets.filter((item) => item?.pmMarketId && !prev.markets.some((row) => row?.pmMarketId === item.pmMarketId)),
+          ]
+        : nextMarkets;
+      const mergedPrices = append
+        ? [...prev.prices, ...priceRows.filter((item) => item && !prev.prices.some((row) => `${row.pmMarketId}:${row.outcomeIndex}` === `${item.pmMarketId}:${item.outcomeIndex}`))]
+        : priceRows;
+      return {
+        ...prev,
+        markets: mergedMarkets,
+        prices: mergedPrices,
+      };
+    });
+    setSelectedMarketId((prev) => {
+      if (prev && nextMarkets.some((item) => item?.pmMarketId === prev)) {
+        return prev;
+      }
+      return nextMarkets.find((item) => item?.pmMarketId)?.pmMarketId || "";
+    });
+  }, []);
+
+  const loadCategoryMarkets = useCallback(async ({ category = "", page = 1, append = false } = {}) => {
+    if (!category) {
+      setSelectedCategory("");
+      setSelectedMarketId("");
+      setMarketPage(1);
+      setMarketHasMore(false);
+      setData((prev) => ({
+        ...prev,
+        markets: [],
+        prices: [],
+      }));
+      return;
+    }
+    if (append) {
+      setLoadingMoreMarkets(true);
+    } else {
+      setLoading(true);
+    }
     setError("");
     try {
       const categoryRows = categories.length > 0 ? categories : await loadCategories();
-      const resolvedCategory = category || pickInitialCategory(categoryRows, "");
-      const eventsRes = resolvedCategory
-        ? { data: await fetchEventsForCategoryTab(baseUrl, resolvedCategory, PAGE_SIZE) }
-        : { data: [] };
-      const eventRows = Array.isArray(eventsRes.data) ? eventsRes.data : [];
-      const resolvedEventId = eventId || pickInitialEventId(eventRows, "");
-      let markets = [];
-      let plays = [];
-      if (resolvedEventId) {
-        const [marketsRes, playsRes] = await Promise.all([
-          fetchPolymarketMarkets(baseUrl, resolvedEventId, "", PAGE_SIZE, 0),
-          fetchPolymarketPlays(baseUrl, resolvedEventId, PLAYS_PAGE_SIZE, 0),
-        ]);
-        markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
-        plays = Array.isArray(playsRes.data) ? playsRes.data : [];
-      }
-      const priceRows = plays.flatMap((item) => (Array.isArray(item?.latestPrices) ? item.latestPrices : []));
-      const latestPriceAt = getLatestPriceUpdateAt(priceRows);
-      lastPriceUpdateRef.current = latestPriceAt;
-      setLastPriceRefreshAt(latestPriceAt);
+      const initialCategory = category || pickInitialCategory(categoryRows, "");
+      const resolvedCategory = page === 1
+        ? await findFirstCategoryWithMarkets(baseUrl, categoryRows, initialCategory)
+        : initialCategory;
+      const marketsRes = resolvedCategory
+        ? await fetchPolymarketMarkets(baseUrl, { category: resolvedCategory, page, size: PAGE_SIZE })
+        : { data: [], meta: { total: 0 } };
+      const markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
+      const total = Number(marketsRes?.meta?.total ?? 0);
       setSelectedCategory(resolvedCategory);
-      setSelectedEventId(resolvedEventId);
-      setSelectedMarketId(markets.find((item) => item && item.pmMarketId)?.pmMarketId || "");
+      setMarketPage(page);
+      setMarketHasMore(page * PAGE_SIZE < total);
+      hydrateMarkets(markets, append);
       setData((prev) => ({
         ...prev,
         categories: categoryRows,
-        events: eventRows,
-        markets: markets.map((item) => ({ ...item, latestPrices: buildLatestPrices(priceRows, item.pmMarketId) })),
-        plays: plays.map((item) => ({ ...item, latestPrices: buildLatestPrices(priceRows, item.pmMarketId) })),
-        prices: priceRows,
-        results: [],
       }));
+      if (page === 1 && initialCategory && resolvedCategory && initialCategory !== resolvedCategory && markets.length > 0) {
+        setError(`${translateCategoryLabel(initialCategory)} 暂无可展示市场，已切换到 ${translateCategoryLabel(resolvedCategory)}`);
+      }
       if (categories.length === 0) {
         setCategories(categoryRows);
       }
     } catch (err) {
       setError(err?.message || "Polymarket 加载失败");
     } finally {
-      setLoading(false);
+      if (append) {
+        setLoadingMoreMarkets(false);
+      } else {
+        setLoading(false);
+      }
     }
-  }, [baseUrl, categories, loadCategories]);
-
-  const loadSelectedEvent = useCallback(async (nextEventId, nextCategory = selectedCategory) => {
-    if (!nextEventId) {
-      setSelectedEventId("");
-      setSelectedMarketId("");
-      setData((prev) => ({
-        ...prev,
-        markets: [],
-        plays: [],
-        prices: [],
-        results: [],
-      }));
-      return;
-    }
-    setRefreshing(true);
-    setError("");
-    try {
-      const [marketsRes, playsRes] = await Promise.all([
-        fetchPolymarketMarkets(baseUrl, nextEventId, "", PAGE_SIZE, 0),
-        fetchPolymarketPlays(baseUrl, nextEventId, PLAYS_PAGE_SIZE, 0),
-      ]);
-      const markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
-      const plays = Array.isArray(playsRes.data) ? playsRes.data : [];
-      const priceRows = plays.flatMap((item) => (Array.isArray(item?.latestPrices) ? item.latestPrices : []));
-      const latestPriceAt = getLatestPriceUpdateAt(priceRows);
-      lastPriceUpdateRef.current = latestPriceAt;
-      setLastPriceRefreshAt(latestPriceAt);
-      setSelectedEventId(nextEventId);
-      setSelectedMarketId(markets.find((item) => item && item.pmMarketId)?.pmMarketId || "");
-      setData((prev) => ({
-        ...prev,
-        markets: markets.map((item) => ({ ...item, latestPrices: buildLatestPrices(priceRows, item.pmMarketId) })),
-        plays: plays.map((item) => ({ ...item, latestPrices: buildLatestPrices(priceRows, item.pmMarketId) })),
-        prices: priceRows,
-        results: [],
-      }));
-    } catch (err) {
-      setError(err?.message || "Polymarket 刷新失败");
-    } finally {
-      setRefreshing(false);
-    }
-  }, [baseUrl, selectedCategory]);
+  }, [baseUrl, categories, hydrateMarkets, loadCategories]);
 
   const applySocketPatch = useCallback((message) => {
     if (!message || typeof message !== "object") {
@@ -750,7 +788,6 @@ function PolymarketApp({ baseUrl, balance }) {
         };
         const latestPrices = buildLatestPrices(prices, patch.pmMarketId);
         next.markets = prev.markets.map((item) => (item.pmMarketId === patch.pmMarketId ? { ...item, latestPrices } : item));
-        next.plays = prev.plays.map((item) => (item.pmMarketId === patch.pmMarketId ? { ...item, latestPrices } : item));
         return next;
       });
       setGraphData((prev) => mergeGraphPatch(prev, patch));
@@ -762,16 +799,6 @@ function PolymarketApp({ baseUrl, balance }) {
       setData((prev) => ({
         ...prev,
         markets: prev.markets.map((item) => (
-          item.pmMarketId === patch.pmMarketId
-            ? {
-                ...item,
-                status: "RESOLVED",
-                resolvedOutcome: patch.resolvedOutcome ?? item.resolvedOutcome,
-                resolvedAt: patch.resolvedAt ?? item.resolvedAt,
-              }
-            : item
-        )),
-        plays: prev.plays.map((item) => (
           item.pmMarketId === patch.pmMarketId
             ? {
                 ...item,
@@ -800,22 +827,15 @@ function PolymarketApp({ baseUrl, balance }) {
         const categoryRows = await loadCategories();
         if (cancelled) return;
         setCategories(categoryRows);
-        const initialCategory = pickInitialCategory(categoryRows, "");
+        const initialCategory = await findFirstCategoryWithMarkets(baseUrl, categoryRows, pickInitialCategory(categoryRows, ""));
         if (!initialCategory) {
           setLoading(false);
           return;
         }
-        const eventsRes = { data: await fetchEventsForCategoryTab(baseUrl, initialCategory, PAGE_SIZE) };
-        if (cancelled) return;
-        const eventRows = Array.isArray(eventsRes.data) ? eventsRes.data : [];
-        const initialEventId = pickInitialEventId(eventRows, "");
         setSelectedCategory(initialCategory);
-        setSelectedEventId(initialEventId);
         setData({
           categories: categoryRows,
-          events: eventRows,
           markets: [],
-          plays: [],
           prices: [],
           results: [],
         });
@@ -836,11 +856,11 @@ function PolymarketApp({ baseUrl, balance }) {
   }, [baseUrl, loadCategories]);
 
   useEffect(() => {
-    if (loading || !selectedEventId) {
+    if (loading || !selectedCategory) {
       return;
     }
-    loadSelectedEvent(selectedEventId, selectedCategory);
-  }, [loadSelectedEvent, loading, selectedCategory, selectedEventId]);
+    loadCategoryMarkets({ category: selectedCategory, page: 1, append: false });
+  }, [loadCategoryMarkets, loading, selectedCategory]);
 
   const { connected: wsConnected, subscribeEvent } = usePolymarketSocket({
     baseUrl,
@@ -849,15 +869,20 @@ function PolymarketApp({ baseUrl, balance }) {
     onConnectedChange: setSocketConnected,
   });
 
-  // 当选中 event 变化时,订阅该 event 的价格推送
   useEffect(() => {
-    if (selectedEventId && wsConnected) {
-      subscribeEvent(selectedEventId);
+    if (!wsConnected) {
+      return;
     }
-  }, [selectedEventId, wsConnected, subscribeEvent]);
+    const eventIds = Array.from(new Set(
+      (Array.isArray(data.markets) ? data.markets : [])
+        .map((item) => item?.pmEventId)
+        .filter(Boolean)
+    ));
+    eventIds.forEach((eventId) => subscribeEvent(eventId));
+  }, [data.markets, subscribeEvent, wsConnected]);
 
   useEffect(() => {
-    if (!selectedEventId || !socketConnected || loading) {
+    if (!selectedCategory || !socketConnected || loading) {
       return undefined;
     }
     const timer = window.setInterval(async () => {
@@ -872,7 +897,7 @@ function PolymarketApp({ baseUrl, balance }) {
       staleRefreshInFlightRef.current = true;
       try {
         await Promise.all(marketIds.map((marketId) => syncPolymarketPrice(baseUrl, marketId)));
-        await loadSelectedEvent(selectedEventId, selectedCategory);
+        await loadCategoryMarkets({ category: selectedCategory, page: marketPage, append: false });
       } catch (err) {
         console.warn("兜底刷新价格失败:", err);
       } finally {
@@ -880,21 +905,8 @@ function PolymarketApp({ baseUrl, balance }) {
       }
     }, PRICE_FALLBACK_CHECK_MS);
     return () => window.clearInterval(timer);
-  }, [baseUrl, data.markets, data.prices, loadSelectedEvent, loading, selectedCategory, selectedEventId, socketConnected]);
+  }, [baseUrl, data.markets, data.prices, loadCategoryMarkets, loading, marketPage, selectedCategory, socketConnected]);
 
-  const selectedEvent = useMemo(() => (
-    (Array.isArray(data.events) ? data.events : []).find((item) => item && item.pmEventId === selectedEventId) || null
-  ), [data.events, selectedEventId]);
-
-  const visiblePlays = useMemo(() => {
-    const plays = Array.isArray(data.plays) ? data.plays : [];
-    if (!selectedMarketId) {
-      return plays;
-    }
-    return plays.filter((item) => item && item.pmMarketId === selectedMarketId);
-  }, [data.plays, selectedMarketId]);
-
-  const resolvedPlays = useMemo(() => visiblePlays.filter((item) => item && (item.status === "RESOLVED" || item.resolvedOutcome)), [visiblePlays]);
   const selectedMarket = useMemo(() => (
     (Array.isArray(data.markets) ? data.markets : []).find((item) => item && item.pmMarketId === selectedMarketId) || null
   ), [data.markets, selectedMarketId]);
@@ -902,25 +914,18 @@ function PolymarketApp({ baseUrl, balance }) {
 
   const summary = useMemo(() => ([
     { label: "分类", value: categories.length },
-    { label: "事件", value: data.events.length },
+    { label: "分页", value: marketPage },
     { label: "市场", value: data.markets.length },
-    { label: "玩法", value: visiblePlays.length },
-  ]), [categories.length, data.events.length, data.markets.length, visiblePlays.length]);
-
-  const eventList = useMemo(() => {
-    const list = Array.isArray(data.events) ? data.events : [];
-    const keyword = String(searchQuery || "").trim().toLowerCase();
-    if (!keyword) return list;
-    return list.filter((item) => getEventTitle(item).toLowerCase().includes(keyword));
-  }, [data.events, searchQuery]);
+    { label: "可下单选项", value: data.markets.reduce((count, item) => count + getOutcomeRows(item).length, 0) },
+  ]), [categories.length, data.markets, marketPage]);
 
   const currentList = useMemo(() => {
-    if (activeTab === "markets") return deriveDisplayCards(visiblePlays, data.markets);
+    if (activeTab === "markets") return data.markets;
     if (activeTab === "graph") return [];
-    if (activeTab === "results") return resolvedPlays;
+    if (activeTab === "results") return data.results;
     if (activeTab === "orders") return orders;
-    return visiblePlays;
-  }, [activeTab, data.markets, resolvedPlays, visiblePlays, orders]);
+    return data.markets;
+  }, [activeTab, data.markets, data.results, orders]);
 
   const filteredCurrentList = useMemo(() => {
     const keyword = String(searchQuery || "").trim().toLowerCase();
@@ -933,7 +938,7 @@ function PolymarketApp({ baseUrl, balance }) {
   }, [currentList, searchQuery]);
 
   useEffect(() => {
-    if (!loading && !error && !["markets", "plays", "graph", "results", "orders"].includes(activeTab)) {
+    if (!loading && !error && !["markets", "graph", "results", "orders"].includes(activeTab)) {
       setActiveTab("markets");
     }
   }, [activeTab, error, loading]);
@@ -961,63 +966,19 @@ function PolymarketApp({ baseUrl, balance }) {
     loadGraph(selectedMarketId, graphRange);
   }, [activeTab, graphRange, loadGraph, selectedMarketId]);
 
-  const handleSync = useCallback(async (type) => {
-    setRefreshing(true);
-    setError("");
-    try {
-      if (type === "events") {
-        await syncPolymarketEvents(baseUrl);
-      } else if (type === "markets") {
-        await syncPolymarketMarkets(baseUrl);
-      } else {
-        await syncPolymarketPlays(baseUrl);
-      }
-      if (selectedCategory) {
-        await loadCategoryPath({ category: selectedCategory, eventId: selectedEventId });
-      }
-    } catch (err) {
-      setError(err?.message || "同步失败");
-    } finally {
-      setRefreshing(false);
-    }
-  }, [baseUrl, loadCategoryPath, selectedCategory, selectedEventId]);
-
   const handleCategoryClick = useCallback((category) => {
     if (!category || category === selectedCategory) {
       return;
     }
-    loadCategoryPath({ category });
-  }, [loadCategoryPath, selectedCategory]);
+    loadCategoryMarkets({ category, page: 1, append: false });
+  }, [loadCategoryMarkets, selectedCategory]);
 
-  const handleEventClick = useCallback((eventId) => {
-    if (!eventId || eventId === selectedEventId) {
-      return;
-    }
-    loadSelectedEvent(eventId, selectedCategory);
-  }, [loadSelectedEvent, selectedCategory, selectedEventId]);
-
-  const handleMarketClick = useCallback(async (marketId) => {
+  const handleMarketClick = useCallback((marketId) => {
     if (!marketId || marketId === selectedMarketId) {
       return;
     }
     setSelectedMarketId(marketId);
-    // 重新请求带 pmMarketId 的 plays,确保能获取到该 market 的玩法
-    try {
-      const playsRes = await fetchPolymarketPlays(baseUrl, selectedEventId, PLAYS_PAGE_SIZE, 0, marketId);
-      const plays = Array.isArray(playsRes.data) ? playsRes.data : [];
-      if (plays.length > 0) {
-        setData((prev) => ({
-          ...prev,
-          plays: plays.map((item) => ({
-            ...item,
-            latestPrices: buildLatestPrices(prev.prices, item.pmMarketId),
-          })),
-        }));
-      }
-    } catch (err) {
-      console.warn("加载 market plays 失败:", err);
-    }
-  }, [baseUrl, selectedEventId, selectedMarketId]);
+  }, [selectedMarketId]);
 
   const handleOrderClick = useCallback((e, play, outcomeIndex, outcomeName, side) => {
     e.stopPropagation();
@@ -1073,11 +1034,15 @@ function PolymarketApp({ baseUrl, balance }) {
     setOrderAmount("");
   }, []);
 
-  const loadOrders = useCallback(async () => {
+  const loadOrders = useCallback(async ({ page = 1, append = false } = {}) => {
     setOrdersLoading(true);
     try {
-      const res = await fetchPolymarketOrders(baseUrl, 0, 50);
-      setOrders(Array.isArray(res.data) ? res.data : []);
+      const res = await fetchPolymarketOrders(baseUrl, page, ORDER_PAGE_SIZE);
+      const rows = Array.isArray(res.data) ? res.data : [];
+      const total = Number(res?.meta?.total ?? 0);
+      setOrdersPage(page);
+      setOrdersHasMore(page * ORDER_PAGE_SIZE < total);
+      setOrders((prev) => (append ? [...prev, ...rows] : rows));
     } catch (err) {
       console.warn("加载订单失败:", err);
     } finally {
@@ -1085,12 +1050,65 @@ function PolymarketApp({ baseUrl, balance }) {
     }
   }, [baseUrl]);
 
-  // 切换到订单 tab 时加载订单
+  const loadResults = useCallback(async ({ page = 1, append = false } = {}) => {
+    setResultsLoading(true);
+    try {
+      const res = await fetchPolymarketResults(baseUrl, page, RESULT_PAGE_SIZE);
+      const rows = Array.isArray(res.data) ? res.data : [];
+      const total = Number(res?.meta?.total ?? 0);
+      setResultsPage(page);
+      setResultsHasMore(page * RESULT_PAGE_SIZE < total);
+      setData((prev) => ({
+        ...prev,
+        results: append ? [...prev.results, ...rows] : rows,
+      }));
+    } catch (err) {
+      console.warn("加载历史记录失败:", err);
+    } finally {
+      setResultsLoading(false);
+    }
+  }, [baseUrl]);
+
   useEffect(() => {
     if (activeTab === "orders") {
-      loadOrders();
+      loadOrders({ page: 1, append: false });
     }
   }, [activeTab, loadOrders]);
+
+  useEffect(() => {
+    if (activeTab === "results") {
+      loadResults({ page: 1, append: false });
+    }
+  }, [activeTab, loadResults]);
+
+  const handleLoadMore = useCallback(() => {
+    if (activeTab === "markets" && !loadingMoreMarkets && marketHasMore) {
+      loadCategoryMarkets({ category: selectedCategory, page: marketPage + 1, append: true });
+      return;
+    }
+    if (activeTab === "orders" && !ordersLoading && ordersHasMore) {
+      loadOrders({ page: ordersPage + 1, append: true });
+      return;
+    }
+    if (activeTab === "results" && !resultsLoading && resultsHasMore) {
+      loadResults({ page: resultsPage + 1, append: true });
+    }
+  }, [
+    activeTab,
+    loadCategoryMarkets,
+    loadOrders,
+    loadResults,
+    loadingMoreMarkets,
+    marketHasMore,
+    marketPage,
+    ordersHasMore,
+    ordersLoading,
+    ordersPage,
+    resultsHasMore,
+    resultsLoading,
+    resultsPage,
+    selectedCategory,
+  ]);
 
   return (
     <div className="polymarket-shell pm-board-shell">
@@ -1098,13 +1116,13 @@ function PolymarketApp({ baseUrl, balance }) {
         <div>
           <h2 className="pm-board-title">所有盘口</h2>
           <div className="pm-board-subtitle">
-            {selectedCategory ? `${translateCategoryLabel(selectedCategory)} · ${translateDynamicText(selectedEvent?.title || selectedEvent?.slug || "全部事件")}` : "选择分类和事件后查看盘口"}
+            {selectedCategory ? `${translateCategoryLabel(selectedCategory)} · 直接按市场展示` : "选择分类后查看盘口"}
           </div>
         </div>
         <div className="pm-board-tools">
           <div className="pm-board-balance">可用余额 {availableBalance.toFixed(2)} USDT</div>
-          <button type="button" className="pm-board-icon" onClick={() => loadCategoryPath({ category: selectedCategory, eventId: selectedEventId })} disabled={loading || refreshing}>
-            {loading || refreshing ? "刷新中" : "刷新"}
+          <button type="button" className="pm-board-icon" onClick={() => loadCategoryMarkets({ category: selectedCategory, page: 1, append: false })} disabled={loading || loadingMoreMarkets}>
+            {loading || loadingMoreMarkets ? "刷新中" : "刷新"}
           </button>
         </div>
       </section>
@@ -1131,27 +1149,11 @@ function PolymarketApp({ baseUrl, balance }) {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pm-board-search-input"
-          placeholder="搜索事件、问题或选项"
+          placeholder="搜索问题或选项"
         />
         <div className="pm-board-search-meta">
           最新价格：北京时间 {formatBeijingTime(lastPriceRefreshAt)} · {socketConnected ? "WS 已连接" : "WS 未连接"}
         </div>
-      </section>
-
-      <section className="pm-board-events" aria-label="事件列表">
-        {eventList.map((item) => {
-          const eventId = item?.pmEventId || "";
-          return (
-            <button
-              key={eventId}
-              type="button"
-              className={selectedEventId === eventId ? "pm-board-event active" : "pm-board-event"}
-              onClick={() => handleEventClick(eventId)}
-            >
-              {getEventTitle(item)}
-            </button>
-          );
-        })}
       </section>
 
       <section className="pm-board-tabs" role="tablist" aria-label="标签页">
@@ -1169,8 +1171,8 @@ function PolymarketApp({ baseUrl, balance }) {
 
       {error ? <div className="pm-empty" style={{ color: "#dc2626" }}>{error}</div> : null}
       {!error && !loading && !selectedCategory ? <div className="pm-empty">当前没有已开启的分类。</div> : null}
-      {!error && !loading && selectedCategory && selectedEventId && data.markets.length === 0 && activeTab === "markets" ? (
-        <div className="pm-empty">当前事件下还没有可展示的市场数据。</div>
+      {!error && !loading && selectedCategory && data.markets.length === 0 && activeTab === "markets" ? (
+        <div className="pm-empty">当前分类下还没有可展示的市场数据。</div>
       ) : null}
       {loading ? <div className="pm-empty">正在加载数据...</div> : null}
 
@@ -1317,9 +1319,24 @@ function PolymarketApp({ baseUrl, balance }) {
 
       {!loading && !error && filteredCurrentList.length === 0 ? (
         <div className="pm-empty">
-          {activeTab === "orders" ? (ordersLoading ? "加载订单中..." : "暂无订单记录") : "当前没有可展示的数据。"}
+          {activeTab === "orders" ? (ordersLoading ? "加载订单中..." : "暂无订单记录") : activeTab === "results" ? (resultsLoading ? "加载历史记录中..." : "暂无历史记录") : "当前没有可展示的数据。"}
         </div>
       ) : null}
+
+      {!loading && !error && (
+        <div className="pm-board-pagination">
+          {(activeTab === "markets" && marketHasMore) || (activeTab === "orders" && ordersHasMore) || (activeTab === "results" && resultsHasMore) ? (
+            <button
+              type="button"
+              className="pm-board-load-more"
+              onClick={handleLoadMore}
+              disabled={loadingMoreMarkets || ordersLoading || resultsLoading}
+            >
+              {loadingMoreMarkets || ordersLoading || resultsLoading ? "加载中..." : "加载更多"}
+            </button>
+          ) : null}
+        </div>
+      )}
 
       {/* 下单弹窗 */}
       {orderModal && (
