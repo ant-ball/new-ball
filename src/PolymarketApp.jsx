@@ -59,22 +59,6 @@ const CATEGORY_LABELS = {
   climate: "气候",
 };
 
-const CATEGORY_GROUPS = [
-  { key: "global", label: "全球", sources: ["global"] },
-  { key: "sports", label: "体育", sources: ["sports"] },
-  { key: "trump", label: "川普", sources: ["trump"] },
-  { key: "crypto", label: "加密", sources: ["crypto"] },
-  { key: "commodities", label: "大宗商品", sources: ["commodities"] },
-  { key: "esports", label: "电竞", sources: ["esports"] },
-  { key: "iran", label: "伊朗", sources: ["iran"] },
-  { key: "finance", label: "财经", sources: ["finance"] },
-  { key: "technology", label: "科技", sources: ["technology"] },
-  { key: "culture", label: "文化", sources: ["culture"] },
-  { key: "economy", label: "经济", sources: ["economy"] },
-  { key: "climate", label: "气候", sources: ["climate"] },
-  { key: "world cup", label: "世界杯", sources: ["world cup"] },
-];
-
 function formatStatusLabel(status) {
   const normalized = String(status || "").trim().toUpperCase();
   if (!normalized) return "进行中";
@@ -120,18 +104,6 @@ function translateCategoryLabel(value) {
   const raw = String(value || "").trim();
   if (!raw) return raw;
   return CATEGORY_LABELS[raw.toLowerCase()] || raw;
-}
-
-function getCategoryGroup(tabKey) {
-  return CATEGORY_GROUPS.find((item) => item.key === tabKey) || null;
-}
-
-function buildVisibleCategoryTabs() {
-  return CATEGORY_GROUPS.map((item) => ({
-    category: item.key,
-    label: item.label,
-    sources: item.sources,
-  }));
 }
 
 function translateDynamicText(value) {
@@ -531,36 +503,6 @@ function pickInitialCategory(categoryRows, requestedCategory = "") {
   return enabledCategories[0] || "";
 }
 
-async function fetchEventsForCategoryTab(baseUrl, tabKey, limit = PAGE_SIZE) {
-  const group = getCategoryGroup(tabKey);
-  const sources = Array.isArray(group?.sources) ? group.sources : [];
-  if (sources.length === 0) {
-    return [];
-  }
-  const results = await Promise.all(
-    sources.map((category) => fetchPolymarketEvents(baseUrl, category, 1, limit).catch(() => ({ data: [] })))
-  );
-  const mergedMap = new Map();
-  results.forEach((response) => {
-    const rows = Array.isArray(response?.data) ? response.data : [];
-    rows.forEach((row) => {
-      if (!row?.pmEventId) return;
-      if (!mergedMap.has(row.pmEventId)) {
-        mergedMap.set(row.pmEventId, row);
-      }
-    });
-  });
-  return Array.from(mergedMap.values()).sort((left, right) => Number(right?.priceCount || 0) - Number(left?.priceCount || 0));
-}
-
-function pickInitialEventId(eventRows, preferredEventId = "") {
-  const list = Array.isArray(eventRows) ? eventRows : [];
-  if (preferredEventId && list.some((item) => item && item.pmEventId === preferredEventId)) {
-    return preferredEventId;
-  }
-  return list.length > 0 ? (list[0]?.pmEventId || "") : "";
-}
-
 function attachLatestPricesToMarkets(markets, plays) {
   if (!Array.isArray(markets) || markets.length === 0) {
     return [];
@@ -640,18 +582,22 @@ function PolymarketApp({ baseUrl, balance }) {
     const response = await fetchPolymarketCategories(baseUrl);
     const remoteRows = Array.isArray(response?.data) ? response.data : [];
     if (remoteRows.length === 0) {
-      return buildVisibleCategoryTabs();
+      return [];
     }
     const enabledMap = new Map();
     remoteRows.forEach((item) => {
       const category = String(item?.category || "").trim();
       if (!category) return;
-      enabledMap.set(category, {
+      const categoryKey = category.toLowerCase();
+      if (enabledMap.has(categoryKey)) {
+        return;
+      }
+      enabledMap.set(categoryKey, {
         category,
         label: translateCategoryLabel(category),
       });
     });
-    return buildVisibleCategoryTabs().filter((item) => enabledMap.has(item.category));
+    return Array.from(enabledMap.values());
   }, [baseUrl]);
 
   const hydrateMarkets = useCallback((marketRows, append = false) => {
