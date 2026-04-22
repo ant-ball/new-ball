@@ -146,6 +146,20 @@ export async function createPolymarketOrder(baseUrl, orderData) {
   return { url, data: unwrapData(json) || json };
 }
 
+export async function fetchPolymarketMarketPosition(baseUrl, pmMarketId) {
+  const { url, json } = await requestJson(baseUrl, `/polymarket/market-position?pmMarketId=${encodeURIComponent(pmMarketId)}`);
+  return { url, data: unwrapData(json) || null };
+}
+
+export async function closePolymarketPosition(baseUrl, payload) {
+  const { url, json } = await requestJson(baseUrl, "/polymarket/close-position", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return { url, data: unwrapData(json) || json };
+}
+
 export async function fetchPolymarketOrders(baseUrl, page = 1, size = 50) {
   const { url, json } = await requestJson(baseUrl, `/polymarket/orders?page=${page}&size=${size}`);
   return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };

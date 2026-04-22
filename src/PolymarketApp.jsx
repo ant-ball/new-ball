@@ -5,6 +5,8 @@ import {
   fetchPolymarketGraph,
   syncPolymarketPrice,
   createPolymarketOrder,
+  fetchPolymarketMarketPosition,
+  closePolymarketPosition,
   fetchPolymarketOrders,
   fetchPolymarketResults,
 } from "./polymarketApi";
@@ -333,6 +335,38 @@ function extractOutcomePrice(item, idx) {
   return null;
 }
 
+function extractOutcomeQuote(item, idx, side = "BUY") {
+  const latestPrices = Array.isArray(item?.latestPrices) ? item.latestPrices : [];
+  const priceRow = latestPrices.find((row) => Number(row.outcomeIndex) === Number(idx));
+  if (priceRow) {
+    const bid = Number(priceRow.bestBid);
+    const ask = Number(priceRow.bestAsk);
+    const mid = Number(priceRow.price);
+    if (String(side).toUpperCase() === "SELL") {
+      if (Number.isFinite(bid) && bid > 0) return bid;
+      if (Number.isFinite(mid) && mid > 0) return mid;
+      if (Number.isFinite(ask) && ask > 0) return ask;
+    }
+    if (Number.isFinite(ask) && ask > 0) return ask;
+    if (Number.isFinite(mid) && mid > 0) return mid;
+    if (Number.isFinite(bid) && bid > 0) return bid;
+  }
+  return Number(extractOutcomePrice(item, idx)) || 0;
+}
+
+function findOutcomeIndexByName(item, name) {
+  const normalized = String(name || "").trim().toLowerCase();
+  if (!normalized) return -1;
+  const rows = getOutcomeRows(item);
+  return rows.findIndex((row) => String(row.rawLabel || "").trim().toLowerCase() === normalized);
+}
+
+function formatCentPrice(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return "--";
+  return `${Math.round(num * 100)}¢`;
+}
+
 function deriveDisplayCards(plays, markets) {
   if (Array.isArray(plays) && plays.length > 0) {
     return plays.map((item) => ({ ...item, __kind: "play" }));
@@ -558,9 +592,11 @@ function PolymarketApp({ baseUrl, balance }) {
   const [graphRange, setGraphRange] = useState("1h");
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphData, setGraphData] = useState(null);
-  const [orderModal, setOrderModal] = useState(null); // { play, outcomeIndex, outcomeName, side }
-  const [orderAmount, setOrderAmount] = useState("");
+  const [tradeSide, setTradeSide] = useState("BUY");
+  const [tradeOutcomeIndex, setTradeOutcomeIndex] = useState(0);
+  const [tradeAmount, setTradeAmount] = useState("100");
   const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const [marketPosition, setMarketPosition] = useState(null);
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersPage, setOrdersPage] = useState(1);
@@ -826,6 +862,69 @@ function PolymarketApp({ baseUrl, balance }) {
     (Array.isArray(data.markets) ? data.markets : []).find((item) => item && item.pmMarketId === selectedMarketId) || null
   ), [data.markets, selectedMarketId]);
   const graphSvg = useMemo(() => buildGraphSeriesSvg(Array.isArray(graphData?.series) ? graphData.series : []), [graphData]);
+  const selectedMarketRows = useMemo(() => (
+    selectedMarket ? getOutcomeRows(selectedMarket) : []
+  ), [selectedMarket]);
+  const selectedTradeRow = useMemo(() => (
+    selectedMarketRows.find((row) => Number(row.outcomeIndex) === Number(tradeOutcomeIndex)) || selectedMarketRows[0] || null
+  ), [selectedMarketRows, tradeOutcomeIndex]);
+  const currentTradePrice = useMemo(() => {
+    if (!selectedMarket || !selectedTradeRow) return 0;
+    return extractOutcomeQuote(selectedMarket, selectedTradeRow.outcomeIndex, tradeSide);
+  }, [selectedMarket, selectedTradeRow, tradeSide]);
+  const tradeAmountNumber = useMemo(() => {
+    const parsed = Number(tradeAmount);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  }, [tradeAmount]);
+  const estimatedShares = useMemo(() => (
+    currentTradePrice > 0 && tradeAmountNumber > 0 ? tradeAmountNumber / currentTradePrice : 0
+  ), [currentTradePrice, tradeAmountNumber]);
+  const potentialReturn = useMemo(() => (
+    currentTradePrice > 0 && tradeAmountNumber > 0 ? tradeAmountNumber / currentTradePrice : 0
+  ), [currentTradePrice, tradeAmountNumber]);
+  const maxClosableAmount = useMemo(() => {
+    const size = Number(marketPosition?.size || 0);
+    if (!Number.isFinite(size) || size <= 0 || currentTradePrice <= 0) return 0;
+    return size * currentTradePrice;
+  }, [currentTradePrice, marketPosition]);
+
+  useEffect(() => {
+    if (!selectedMarketId) {
+      setMarketPosition(null);
+      return;
+    }
+    let cancelled = false;
+    fetchPolymarketMarketPosition(baseUrl, selectedMarketId)
+      .then((res) => {
+        if (!cancelled) {
+          setMarketPosition(res?.data || null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMarketPosition(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, selectedMarketId]);
+
+  useEffect(() => {
+    if (!selectedMarketRows.length) {
+      return;
+    }
+    const desiredIndex = marketPosition
+      ? findOutcomeIndexByName(selectedMarket, marketPosition.selectionName || marketPosition.selectionCode)
+      : -1;
+    if (tradeSide === "SELL" && desiredIndex >= 0) {
+      setTradeOutcomeIndex(selectedMarketRows[desiredIndex].outcomeIndex);
+      return;
+    }
+    if (!selectedMarketRows.some((row) => Number(row.outcomeIndex) === Number(tradeOutcomeIndex))) {
+      setTradeOutcomeIndex(selectedMarketRows[0].outcomeIndex);
+    }
+  }, [marketPosition, selectedMarket, selectedMarketRows, tradeOutcomeIndex, tradeSide]);
 
   const summary = useMemo(() => ([
     { label: "分类", value: categories.length },
@@ -903,59 +1002,74 @@ function PolymarketApp({ baseUrl, balance }) {
     setSelectedMarketId(marketId);
   }, [selectedMarketId]);
 
-  const handleOrderClick = useCallback((e, play, outcomeIndex, outcomeName, side) => {
+  const handleTradeOutcomeClick = useCallback((e, marketId, outcomeIndex) => {
     e.stopPropagation();
-    const tokenIds = parseTokenIds(play);
-    const tokenId = tokenIds[outcomeIndex] || "";
-    setOrderModal({ play, outcomeIndex, outcomeName, side, tokenId });
-    setOrderAmount("");
-  }, []);
+    if (marketId && marketId !== selectedMarketId) {
+      setSelectedMarketId(marketId);
+    }
+    setTradeOutcomeIndex(outcomeIndex);
+  }, [selectedMarketId]);
 
   const handleOrderSubmit = useCallback(async () => {
-    if (!orderModal || !orderAmount || orderSubmitting) return;
-    
-    const orderAmountNum = parseFloat(orderAmount);
-    
-    // 余额校验
-    if (orderAmountNum > availableBalance) {
+    if (!selectedMarket || !selectedTradeRow || !tradeAmount || orderSubmitting) return;
+
+    const orderAmountNum = tradeAmountNumber;
+    if (orderAmountNum <= 0) {
+      return;
+    }
+    if (tradeSide === "BUY" && orderAmountNum > availableBalance) {
       alert(`下单金额超过可用余额，可用余额：${availableBalance.toFixed(2)} USDT`);
       return;
     }
-    
+    if (currentTradePrice <= 0) {
+      alert("当前价格不可用");
+      return;
+    }
+
     setOrderSubmitting(true);
     try {
-      const { play, outcomeIndex, outcomeName, side, tokenId } = orderModal;
-      const price = extractOutcomePrice(play, outcomeIndex);
-      await createPolymarketOrder(baseUrl, {
-        pmEventId: play.pmEventId,
-        pmMarketId: play.pmMarketId,
-        tokenId,
-        selectionCode: outcomeName,
-        selectionName: outcomeName,
-        orderSide: side,
-        orderType: "MARKET",
-        orderPrice: price || 0,
-        orderAmount: orderAmountNum,
-      });
-      alert("下单成功");
-      setOrderModal(null);
-      // 切换到订单 tab，会自动加载订单
+      const tokenIds = parseTokenIds(selectedMarket);
+      const tokenId = tokenIds[selectedTradeRow.outcomeIndex] || "";
+      if (tradeSide === "SELL") {
+        const positionSize = Number(marketPosition?.size || 0);
+        if (!positionSize || positionSize <= 0) {
+          throw new Error("当前没有可卖出的持仓");
+        }
+        const sizeToSell = orderAmountNum / currentTradePrice;
+        await closePolymarketPosition(baseUrl, {
+          pmMarketId: selectedMarket.pmMarketId,
+          selectionCode: selectedTradeRow.rawLabel,
+          selectionName: selectedTradeRow.rawLabel,
+          size: sizeToSell,
+          price: currentTradePrice,
+        });
+      } else {
+        await createPolymarketOrder(baseUrl, {
+          pmEventId: selectedMarket.pmEventId,
+          pmMarketId: selectedMarket.pmMarketId,
+          tokenId,
+          selectionCode: selectedTradeRow.rawLabel,
+          selectionName: selectedTradeRow.rawLabel,
+          orderSide: "BUY",
+          orderType: "MARKET",
+          orderPrice: currentTradePrice,
+          orderAmount: orderAmountNum,
+          orderSize: estimatedShares,
+        });
+      }
+      alert(`${tradeSide === "BUY" ? "买入" : "卖出"}成功`);
       setActiveTab("orders");
-      // 通知父组件刷新余额
+      const positionRes = await fetchPolymarketMarketPosition(baseUrl, selectedMarket.pmMarketId);
+      setMarketPosition(positionRes?.data || null);
       if (typeof window.refreshBalance === "function") {
         window.refreshBalance();
       }
     } catch (err) {
-      alert("下单失败: " + (err?.message || "未知错误"));
+      alert(`${tradeSide === "BUY" ? "买入" : "卖出"}失败: ` + (err?.message || "未知错误"));
     } finally {
       setOrderSubmitting(false);
     }
-  }, [baseUrl, orderModal, orderAmount, orderSubmitting, availableBalance]);
-
-  const handleOrderClose = useCallback(() => {
-    setOrderModal(null);
-    setOrderAmount("");
-  }, []);
+  }, [availableBalance, baseUrl, currentTradePrice, estimatedShares, marketPosition, orderSubmitting, selectedMarket, selectedTradeRow, tradeAmount, tradeAmountNumber, tradeSide]);
 
   const loadOrders = useCallback(async ({ page = 1, append = false } = {}) => {
     setOrdersLoading(true);
@@ -1237,7 +1351,7 @@ function PolymarketApp({ baseUrl, balance }) {
                         <button
                           type="button"
                           className="pm-board-action yes"
-                          onClick={(e) => handleOrderClick(e, item, row.outcomeIndex, row.rawLabel, "BUY")}
+                          onClick={(e) => handleTradeOutcomeClick(e, item.pmMarketId, row.outcomeIndex)}
                           disabled={closedMarket}
                         >
                           {formatOutcomeLabel(row.rawLabel)}
@@ -1249,7 +1363,7 @@ function PolymarketApp({ baseUrl, balance }) {
                             e.stopPropagation();
                             const fallbackIndex = rows.findIndex((candidate) => String(candidate.rawLabel || "").toLowerCase() === "no");
                             if (fallbackIndex >= 0) {
-                              handleOrderClick(e, item, rows[fallbackIndex].outcomeIndex, rows[fallbackIndex].rawLabel, "BUY");
+                              handleTradeOutcomeClick(e, item.pmMarketId, rows[fallbackIndex].outcomeIndex);
                             }
                           }}
                           disabled={closedMarket || String(row.rawLabel || "").toLowerCase() === "no"}
@@ -1274,6 +1388,101 @@ function PolymarketApp({ baseUrl, balance }) {
 
       {!loading && !error && activeTab === "markets" ? <div ref={marketLoadMoreRef} className="pm-board-scroll-sentinel" aria-hidden="true" /> : null}
 
+      {!loading && !error && activeTab === "markets" && selectedMarket && selectedTradeRow ? (
+        <section className="pm-trade-panel">
+          <div className="pm-trade-tabs">
+            <button
+              type="button"
+              className={tradeSide === "BUY" ? "pm-trade-tab active" : "pm-trade-tab"}
+              onClick={() => setTradeSide("BUY")}
+            >
+              买入
+            </button>
+            <button
+              type="button"
+              className={tradeSide === "SELL" ? "pm-trade-tab active" : "pm-trade-tab"}
+              onClick={() => setTradeSide("SELL")}
+            >
+              卖出
+            </button>
+          </div>
+          <div className="pm-trade-title">{getCardTitle(selectedMarket)}</div>
+          <div className="pm-trade-options">
+            {selectedMarketRows.map((row) => {
+              const active = Number(row.outcomeIndex) === Number(selectedTradeRow.outcomeIndex);
+              return (
+                <button
+                  key={`trade-${row.key}`}
+                  type="button"
+                  className={active ? "pm-trade-option active" : "pm-trade-option"}
+                  onClick={() => setTradeOutcomeIndex(row.outcomeIndex)}
+                >
+                  <span>{formatOutcomeLabel(row.rawLabel)}</span>
+                  <strong>{formatCentPrice(extractOutcomeQuote(selectedMarket, row.outcomeIndex, tradeSide))}</strong>
+                </button>
+              );
+            })}
+          </div>
+          <div className="pm-trade-amount-wrap">
+            <div className="pm-trade-label">金额</div>
+            <div className="pm-trade-amount">${tradeAmountNumber > 0 ? tradeAmountNumber.toFixed(0) : "0"}</div>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={tradeAmount}
+              onChange={(e) => setTradeAmount(e.target.value)}
+              className="pm-trade-input"
+              placeholder="输入金额"
+            />
+            <div className="pm-trade-quick-actions">
+              {[1, 5, 10, 100].map((value) => (
+                <button key={value} type="button" className="pm-trade-quick-btn" onClick={() => setTradeAmount(String(Math.max(0, tradeAmountNumber) + value))}>
+                  +${value}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="pm-trade-quick-btn"
+                onClick={() => setTradeAmount(String(tradeSide === "SELL" ? Math.max(0, Math.floor(maxClosableAmount)) : Math.max(0, Math.floor(availableBalance))))}
+              >
+                最大
+              </button>
+            </div>
+          </div>
+          <div className="pm-trade-summary">
+            <div>
+              <div className="pm-trade-summary-label">{tradeSide === "BUY" ? "赢取" : "卖出回收"}</div>
+              <div className="pm-trade-summary-sub">
+                Avg. Price {formatCentPrice(tradeSide === "BUY" ? currentTradePrice : marketPosition?.avgEntryPrice)}
+              </div>
+            </div>
+            <div className="pm-trade-summary-value">
+              ${tradeSide === "BUY" ? potentialReturn.toFixed(2) : tradeAmountNumber.toFixed(2)}
+            </div>
+          </div>
+          {tradeSide === "SELL" ? (
+            <div className="pm-trade-position-note">
+              当前持仓 {marketPosition?.size ? `${Number(marketPosition.size).toFixed(4)} 份` : "0 份"} · 浮盈 {marketPosition?.unrealizedPnL != null ? `$${Number(marketPosition.unrealizedPnL).toFixed(2)}` : "$0.00"}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="pm-trade-submit"
+            onClick={handleOrderSubmit}
+            disabled={
+              orderSubmitting ||
+              currentTradePrice <= 0 ||
+              tradeAmountNumber <= 0 ||
+              (tradeSide === "BUY" && tradeAmountNumber > availableBalance) ||
+              (tradeSide === "SELL" && (!marketPosition?.size || maxClosableAmount <= 0 || tradeAmountNumber > maxClosableAmount))
+            }
+          >
+            {orderSubmitting ? "提交中..." : "交易"}
+          </button>
+        </section>
+      ) : null}
+
       {!loading && !error && (
         <div className="pm-board-pagination">
           {(activeTab === "orders" && ordersHasMore) || (activeTab === "results" && resultsHasMore) ? (
@@ -1286,112 +1495,6 @@ function PolymarketApp({ baseUrl, balance }) {
               {loadingMoreMarkets || ordersLoading || resultsLoading ? "加载中..." : "加载更多"}
             </button>
           ) : null}
-        </div>
-      )}
-
-      {/* 下单弹窗 */}
-      {orderModal && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0,0,0,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-          onClick={handleOrderClose}
-        >
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: 12,
-              padding: 24,
-              minWidth: 320,
-              maxWidth: 400,
-              boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 700 }}>
-              买入 {formatOutcomeLabel(orderModal.outcomeName)}
-            </h3>
-            <div style={{ marginBottom: 12, fontSize: 14, color: "#64748b" }}>
-              市场：{orderModal.play?.question || orderModal.play?.pmMarketId}
-            </div>
-            <div style={{ marginBottom: 12, padding: "10px 12px", background: "#f1f5f9", borderRadius: 8, fontSize: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>可用余额：</span>
-                <span style={{ fontWeight: 600 }}>{availableBalance.toFixed(2)} USDT</span>
-              </div>
-            </div>
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", marginBottom: 6, fontWeight: 600, fontSize: 14 }}>
-                金额 (USDT)
-              </label>
-              <input
-                type="number"
-                value={orderAmount}
-                onChange={(e) => setOrderAmount(e.target.value)}
-                placeholder="输入金额"
-                max={availableBalance}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: 8,
-                  border: parseFloat(orderAmount) > availableBalance ? "1px solid #ef4444" : "1px solid #e2e8f0",
-                  fontSize: 16,
-                  boxSizing: "border-box",
-                }}
-              />
-              {parseFloat(orderAmount) > availableBalance && (
-                <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>
-                  下单金额不能超过可用余额
-                </div>
-              )}
-            </div>
-            <div style={{ display: "flex", gap: 12 }}>
-              <button
-                type="button"
-                onClick={handleOrderClose}
-                style={{
-                  flex: 1,
-                  padding: "12px",
-                  borderRadius: 8,
-                  border: "1px solid #e2e8f0",
-                  background: "#fff",
-                  fontWeight: 600,
-                  fontSize: 14,
-                  cursor: "pointer",
-                }}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={handleOrderSubmit}
-                disabled={orderSubmitting || !orderAmount || parseFloat(orderAmount) > availableBalance}
-                style={{
-                  flex: 1,
-                  padding: "12px",
-                  borderRadius: 8,
-                  border: "none",
-                  color: "#fff",
-                  fontWeight: 600,
-                  fontSize: 14,
-                  cursor: orderSubmitting || !orderAmount || parseFloat(orderAmount) > availableBalance ? "not-allowed" : "pointer",
-                  opacity: orderSubmitting || !orderAmount || parseFloat(orderAmount) > availableBalance ? 0.6 : 1,
-                  background: isYesLikeOutcome(orderModal.outcomeName) ? "#22c55e" : "#3b82f6",
-                }}
-              >
-                {orderSubmitting ? "提交中..." : "确认下单"}
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>
