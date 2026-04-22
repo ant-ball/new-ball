@@ -3,7 +3,6 @@ import {
   fetchPolymarketCategories,
   fetchPolymarketMarkets,
   fetchPolymarketGraph,
-  syncPolymarketPrice,
   createPolymarketOrder,
   fetchPolymarketMarketPosition,
   closePolymarketPosition,
@@ -15,8 +14,6 @@ import { usePolymarketSocket } from "./usePolymarketSocket";
 const PAGE_SIZE = 20;
 const ORDER_PAGE_SIZE = 20;
 const RESULT_PAGE_SIZE = 20;
-const PRICE_STALE_MS = 60 * 1000;
-const PRICE_FALLBACK_CHECK_MS = 15 * 1000;
 const TABS = [
   { key: "markets", label: "市场" },
   { key: "orders", label: "当前委托" },
@@ -215,6 +212,18 @@ function formatBeijingTime(value) {
     second: "2-digit",
     hour12: false,
   });
+}
+
+function formatLiveUpdateLabel(value, nowMs) {
+  if (!value) return "暂无";
+  const ts = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  if (Number.isNaN(ts) || ts <= 0) return "暂无";
+  const diffSeconds = Math.max(0, Math.floor((nowMs - ts) / 1000));
+  if (diffSeconds < 1) return "刚刚更新";
+  if (diffSeconds < 60) return `${diffSeconds} 秒前更新`;
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes} 分钟前更新`;
+  return `更新于 ${formatBeijingTime(ts)}`;
 }
 
 function formatCompactCurrency(value) {
@@ -578,7 +587,6 @@ function parseTokenIds(item) {
 function PolymarketApp({ baseUrl, balance }) {
   const availableBalance = parseFloat(balance?.amount || 0) - parseFloat(balance?.froze || 0);
   const lastPriceUpdateRef = useRef(0);
-  const staleRefreshInFlightRef = useRef(false);
   const marketLoadMoreRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("markets");
@@ -589,6 +597,7 @@ function PolymarketApp({ baseUrl, balance }) {
   const [error, setError] = useState("");
   const [socketConnected, setSocketConnected] = useState(false);
   const [lastPriceRefreshAt, setLastPriceRefreshAt] = useState(0);
+  const [liveNowMs, setLiveNowMs] = useState(Date.now());
   const [graphRange, setGraphRange] = useState("1h");
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphData, setGraphData] = useState(null);
@@ -807,6 +816,13 @@ function PolymarketApp({ baseUrl, balance }) {
   }, [baseUrl, loadCategories]);
 
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      setLiveNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     if (!selectedCategory) {
       return;
     }
@@ -831,32 +847,6 @@ function PolymarketApp({ baseUrl, balance }) {
     ));
     eventIds.forEach((eventId) => subscribeEvent(eventId));
   }, [data.markets, subscribeEvent, wsConnected]);
-
-  useEffect(() => {
-    if (!selectedCategory || !socketConnected || loading) {
-      return undefined;
-    }
-    const timer = window.setInterval(async () => {
-      const marketIds = (Array.isArray(data.markets) ? data.markets : []).map((item) => item?.pmMarketId).filter(Boolean);
-      if (marketIds.length === 0 || staleRefreshInFlightRef.current) {
-        return;
-      }
-      const latestKnownAt = Math.max(lastPriceUpdateRef.current || 0, getLatestPriceUpdateAt(data.prices));
-      if (latestKnownAt > 0 && Date.now() - latestKnownAt < PRICE_STALE_MS) {
-        return;
-      }
-      staleRefreshInFlightRef.current = true;
-      try {
-        await Promise.all(marketIds.map((marketId) => syncPolymarketPrice(baseUrl, marketId)));
-        await loadCategoryMarkets({ category: selectedCategory, page: marketPage, append: false });
-      } catch (err) {
-        console.warn("兜底刷新价格失败:", err);
-      } finally {
-        staleRefreshInFlightRef.current = false;
-      }
-    }, PRICE_FALLBACK_CHECK_MS);
-    return () => window.clearInterval(timer);
-  }, [baseUrl, data.markets, data.prices, loadCategoryMarkets, loading, marketPage, selectedCategory, socketConnected]);
 
   const selectedMarket = useMemo(() => (
     (Array.isArray(data.markets) ? data.markets : []).find((item) => item && item.pmMarketId === selectedMarketId) || null
@@ -1215,7 +1205,7 @@ function PolymarketApp({ baseUrl, balance }) {
           placeholder="搜索问题或选项"
         />
         <div className="pm-board-search-meta">
-          最新价格：北京时间 {formatBeijingTime(lastPriceRefreshAt)} · {socketConnected ? "WS 已连接" : "WS 未连接"}
+          最新价格：{formatLiveUpdateLabel(lastPriceRefreshAt, liveNowMs)} · {socketConnected ? "WS 已连接" : "WS 未连接"}
         </div>
       </section>
 
