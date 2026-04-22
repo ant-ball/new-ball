@@ -775,6 +775,11 @@
   justify-content: center;
 }
 
+.pm-board-scroll-sentinel {
+  width: 100%;
+  height: 1px;
+}
+
 .pm-board-load-more {
   appearance: none;
   border: 1px solid rgba(148, 163, 184, 0.22);

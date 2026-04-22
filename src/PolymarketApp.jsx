@@ -561,32 +561,6 @@ function pickInitialEventId(eventRows, preferredEventId = "") {
   return list.length > 0 ? (list[0]?.pmEventId || "") : "";
 }
 
-async function findFirstCategoryWithMarkets(baseUrl, categoryRows, preferredCategory = "") {
-  const orderedCategories = [];
-  const pushCategory = (value) => {
-    const category = String(value || "").trim();
-    if (!category || orderedCategories.includes(category)) {
-      return;
-    }
-    orderedCategories.push(category);
-  };
-  pushCategory(preferredCategory);
-  (Array.isArray(categoryRows) ? categoryRows : []).forEach((item) => pushCategory(item?.category));
-
-  for (const category of orderedCategories) {
-    try {
-      const response = await fetchPolymarketMarkets(baseUrl, { category, page: 1, size: 1 });
-      const rows = Array.isArray(response?.data) ? response.data : [];
-      if (rows.length > 0) {
-        return category;
-      }
-    } catch {
-      // Ignore probe failures and continue to the next category.
-    }
-  }
-  return preferredCategory || orderedCategories[0] || "";
-}
-
 function attachLatestPricesToMarkets(markets, plays) {
   if (!Array.isArray(markets) || markets.length === 0) {
     return [];
@@ -629,6 +603,7 @@ function PolymarketApp({ baseUrl, balance }) {
   const availableBalance = parseFloat(balance?.amount || 0) - parseFloat(balance?.froze || 0);
   const lastPriceUpdateRef = useRef(0);
   const staleRefreshInFlightRef = useRef(false);
+  const marketLoadMoreRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("markets");
   const [categories, setCategories] = useState([]);
@@ -732,10 +707,7 @@ function PolymarketApp({ baseUrl, balance }) {
     setError("");
     try {
       const categoryRows = categories.length > 0 ? categories : await loadCategories();
-      const initialCategory = category || pickInitialCategory(categoryRows, "");
-      const resolvedCategory = page === 1
-        ? await findFirstCategoryWithMarkets(baseUrl, categoryRows, initialCategory)
-        : initialCategory;
+      const resolvedCategory = category || pickInitialCategory(categoryRows, "");
       const marketsRes = resolvedCategory
         ? await fetchPolymarketMarkets(baseUrl, { category: resolvedCategory, page, size: PAGE_SIZE })
         : { data: [], meta: { total: 0 } };
@@ -749,9 +721,6 @@ function PolymarketApp({ baseUrl, balance }) {
         ...prev,
         categories: categoryRows,
       }));
-      if (page === 1 && initialCategory && resolvedCategory && initialCategory !== resolvedCategory && markets.length > 0) {
-        setError(`${translateCategoryLabel(initialCategory)} 暂无可展示市场，已切换到 ${translateCategoryLabel(resolvedCategory)}`);
-      }
       if (categories.length === 0) {
         setCategories(categoryRows);
       }
@@ -827,7 +796,7 @@ function PolymarketApp({ baseUrl, balance }) {
         const categoryRows = await loadCategories();
         if (cancelled) return;
         setCategories(categoryRows);
-        const initialCategory = await findFirstCategoryWithMarkets(baseUrl, categoryRows, pickInitialCategory(categoryRows, ""));
+        const initialCategory = pickInitialCategory(categoryRows, "");
         if (!initialCategory) {
           setLoading(false);
           return;
@@ -856,11 +825,11 @@ function PolymarketApp({ baseUrl, balance }) {
   }, [baseUrl, loadCategories]);
 
   useEffect(() => {
-    if (loading || !selectedCategory) {
+    if (!selectedCategory) {
       return;
     }
     loadCategoryMarkets({ category: selectedCategory, page: 1, append: false });
-  }, [loadCategoryMarkets, loading, selectedCategory]);
+  }, [loadCategoryMarkets, selectedCategory]);
 
   const { connected: wsConnected, subscribeEvent } = usePolymarketSocket({
     baseUrl,
@@ -970,8 +939,16 @@ function PolymarketApp({ baseUrl, balance }) {
     if (!category || category === selectedCategory) {
       return;
     }
-    loadCategoryMarkets({ category, page: 1, append: false });
-  }, [loadCategoryMarkets, selectedCategory]);
+    setSelectedCategory(category);
+    setSelectedMarketId("");
+    setMarketPage(1);
+    setMarketHasMore(false);
+    setData((prev) => ({
+      ...prev,
+      markets: [],
+      prices: [],
+    }));
+  }, [selectedCategory]);
 
   const handleMarketClick = useCallback((marketId) => {
     if (!marketId || marketId === selectedMarketId) {
@@ -1109,6 +1086,32 @@ function PolymarketApp({ baseUrl, balance }) {
     resultsPage,
     selectedCategory,
   ]);
+
+  useEffect(() => {
+    if (activeTab !== "markets" || loading || loadingMoreMarkets || !marketHasMore) {
+      return undefined;
+    }
+    const target = marketLoadMoreRef.current;
+    if (!target) {
+      return undefined;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (!entry?.isIntersecting) {
+          return;
+        }
+        loadCategoryMarkets({ category: selectedCategory, page: marketPage + 1, append: true });
+      },
+      {
+        root: null,
+        rootMargin: "400px 0px",
+        threshold: 0,
+      }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [activeTab, loadCategoryMarkets, loading, loadingMoreMarkets, marketHasMore, marketPage, selectedCategory]);
 
   return (
     <div className="polymarket-shell pm-board-shell">
@@ -1323,9 +1326,11 @@ function PolymarketApp({ baseUrl, balance }) {
         </div>
       ) : null}
 
+      {!loading && !error && activeTab === "markets" ? <div ref={marketLoadMoreRef} className="pm-board-scroll-sentinel" aria-hidden="true" /> : null}
+
       {!loading && !error && (
         <div className="pm-board-pagination">
-          {(activeTab === "markets" && marketHasMore) || (activeTab === "orders" && ordersHasMore) || (activeTab === "results" && resultsHasMore) ? (
+          {(activeTab === "orders" && ordersHasMore) || (activeTab === "results" && resultsHasMore) ? (
             <button
               type="button"
               className="pm-board-load-more"
