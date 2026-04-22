@@ -64,7 +64,9 @@ function formatStatusLabel(status) {
   if (normalized === "ACTIVE") return "进行中";
   if (normalized === "CLOSED") return "已关闭";
   if (normalized === "RESOLVED") return "已结算";
+  if (normalized === "SETTLED") return "已结算";
   if (normalized === "OPEN") return "待结算";
+  if (normalized === "MANUAL_CLOSED") return "已卖出";
   if (normalized === "WIN") return "已中奖";
   if (normalized === "LOSE") return "未命中";
   if (normalized === "PENDING") return "处理中";
@@ -376,6 +378,24 @@ function formatCentPrice(value) {
   return `${Math.round(num * 100)}¢`;
 }
 
+function getRemainingOrderSize(order) {
+  const candidates = [order?.remainingSize, order?.filledSize, order?.orderSize];
+  for (const candidate of candidates) {
+    const num = Number(candidate);
+    if (Number.isFinite(num) && num > 0) return num;
+  }
+  return 0;
+}
+
+function getRemainingOrderAmount(order) {
+  const candidates = [order?.remainingAmount, order?.filledAmount, order?.orderAmount];
+  for (const candidate of candidates) {
+    const num = Number(candidate);
+    if (Number.isFinite(num) && num > 0) return num;
+  }
+  return 0;
+}
+
 function deriveDisplayCards(plays, markets) {
   if (Array.isArray(plays) && plays.length > 0) {
     return plays.map((item) => ({ ...item, __kind: "play" }));
@@ -607,6 +627,7 @@ function PolymarketApp({ baseUrl, balance }) {
   const [orderSubmitting, setOrderSubmitting] = useState(false);
   const [marketPosition, setMarketPosition] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [orderSellDrafts, setOrderSellDrafts] = useState({});
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersPage, setOrdersPage] = useState(1);
   const [ordersHasMore, setOrdersHasMore] = useState(false);
@@ -750,6 +771,23 @@ function PolymarketApp({ baseUrl, balance }) {
         next.markets = prev.markets.map((item) => (item.pmMarketId === patch.pmMarketId ? { ...item, latestPrices } : item));
         return next;
       });
+      setOrders((prev) => prev.map((item) => {
+        if (!item || item.pmMarketId !== patch.pmMarketId) {
+          return item;
+        }
+        const previousRows = Array.isArray(item.latestPrices) ? item.latestPrices : [];
+        const nextRows = upsertByKey(previousRows, (row) => `${row.pmMarketId}:${row.outcomeIndex}`, patch);
+        const currentSelection = String(item.selectionCode || item.selectionName || "").trim().toLowerCase();
+        const selectedRow = nextRows.find((row) => String(row.outcomeName || "").trim().toLowerCase() === currentSelection);
+        const nextCurrentPrice = selectedRow
+          ? (Number(selectedRow.bestBid) > 0 ? Number(selectedRow.bestBid) : Number(selectedRow.price) || 0)
+          : Number(item.currentPrice || 0);
+        return {
+          ...item,
+          latestPrices: nextRows,
+          currentPrice: nextCurrentPrice > 0 ? nextCurrentPrice : item.currentPrice,
+        };
+      }));
       setGraphData((prev) => mergeGraphPatch(prev, patch));
       return;
     }
@@ -1076,6 +1114,63 @@ function PolymarketApp({ baseUrl, balance }) {
       setOrdersLoading(false);
     }
   }, [baseUrl]);
+
+  const handleOrderSellDraftChange = useCallback((orderNo, value) => {
+    setOrderSellDrafts((prev) => ({
+      ...prev,
+      [orderNo]: value,
+    }));
+  }, []);
+
+  const handleOrderSell = useCallback(async (order) => {
+    if (!order || !order.orderNo) {
+      return;
+    }
+    const currentPrice = Number(order.currentPrice || 0);
+    const remainingSize = getRemainingOrderSize(order);
+    const maxAmount = currentPrice > 0 ? remainingSize * currentPrice : 0;
+    const draftValue = Number(orderSellDrafts[order.orderNo] || 0);
+    if (!(draftValue > 0)) {
+      alert("请输入卖出金额");
+      return;
+    }
+    if (!(currentPrice > 0)) {
+      alert("当前卖价不可用");
+      return;
+    }
+    if (draftValue > maxAmount + 1e-8) {
+      alert(`卖出金额超过可卖上限，当前最多可卖 ${maxAmount.toFixed(2)} USDC`);
+      return;
+    }
+    try {
+      setOrderSubmitting(true);
+      await closePolymarketPosition(baseUrl, {
+        pmMarketId: order.pmMarketId,
+        selectionCode: order.selectionCode,
+        selectionName: order.selectionName,
+        sourceOrderNo: order.orderNo,
+        size: draftValue / currentPrice,
+        price: currentPrice,
+      });
+      setOrderSellDrafts((prev) => ({
+        ...prev,
+        [order.orderNo]: "",
+      }));
+      await loadOrders({ page: 1, append: false });
+      if (selectedMarket?.pmMarketId === order.pmMarketId) {
+        const positionRes = await fetchPolymarketMarketPosition(baseUrl, order.pmMarketId, order.selectionCode || order.selectionName || "");
+        setMarketPosition(positionRes?.data || null);
+      }
+      if (typeof window.refreshBalance === "function") {
+        window.refreshBalance();
+      }
+      alert("卖出成功");
+    } catch (err) {
+      alert(`卖出失败: ${err?.message || "未知错误"}`);
+    } finally {
+      setOrderSubmitting(false);
+    }
+  }, [baseUrl, loadOrders, orderSellDrafts, selectedMarket?.pmMarketId]);
 
   const loadResults = useCallback(async ({ page = 1, append = false } = {}) => {
     setResultsLoading(true);
@@ -1410,6 +1505,11 @@ function PolymarketApp({ baseUrl, balance }) {
         <section className="pm-board-grid">
           {filteredCurrentList.map((item, index) => {
             if (activeTab === "orders") {
+              const currentPrice = Number(item.currentPrice || 0);
+              const remainingSize = getRemainingOrderSize(item);
+              const maxSellAmount = currentPrice > 0 ? remainingSize * currentPrice : 0;
+              const sellDraft = orderSellDrafts[item.orderNo] ?? "";
+              const canManualClose = !!item.canManualClose && currentPrice > 0 && remainingSize > 0;
               return (
                 <article className="pm-board-card" key={item.orderNo || item.id || index}>
                   <div className="pm-board-card-top">
@@ -1444,7 +1544,49 @@ function PolymarketApp({ baseUrl, balance }) {
                       <span>结算盈亏</span>
                       <strong>{item.settlePnl != null ? `${item.settlePnl > 0 ? "+" : ""}${item.settlePnl}` : "-"}</strong>
                     </div>
+                    <div className="pm-board-order-cell">
+                      <span>剩余份额</span>
+                      <strong>{remainingSize > 0 ? remainingSize.toFixed(4) : "-"}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>当前卖价</span>
+                      <strong>{currentPrice > 0 ? formatCentPrice(currentPrice) : "-"}</strong>
+                    </div>
                   </div>
+                  {canManualClose ? (
+                    <div className="pm-order-sell-box">
+                      <div className="pm-order-sell-meta">
+                        <div>最多可卖 {maxSellAmount.toFixed(2)} {item.currency || "USDC"}</div>
+                        <div>均价 {item.orderPrice ? formatCentPrice(item.orderPrice) : "-"} · 公式：卖出盈亏 = 卖出份额 × (卖价 - 买价)</div>
+                      </div>
+                      <div className="pm-order-sell-actions">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="pm-order-sell-input"
+                          value={sellDraft}
+                          onChange={(e) => handleOrderSellDraftChange(item.orderNo, e.target.value)}
+                          placeholder="输入卖出金额"
+                        />
+                        <button
+                          type="button"
+                          className="pm-order-sell-ghost"
+                          onClick={() => handleOrderSellDraftChange(item.orderNo, maxSellAmount > 0 ? maxSellAmount.toFixed(2) : "")}
+                        >
+                          最大
+                        </button>
+                        <button
+                          type="button"
+                          className="pm-order-sell-btn"
+                          disabled={orderSubmitting || !(Number(sellDraft) > 0)}
+                          onClick={() => handleOrderSell(item)}
+                        >
+                          {orderSubmitting ? "卖出中..." : "卖出"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </article>
               );
             }

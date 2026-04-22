@@ -788,6 +788,68 @@
   font-weight: 900;
 }
 
+.pm-order-sell-box {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(226, 232, 240, 0.9);
+  display: grid;
+  gap: 10px;
+}
+
+.pm-order-sell-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pm-order-sell-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+}
+
+.pm-order-sell-input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  background: #fff;
+}
+
+.pm-order-sell-ghost,
+.pm-order-sell-btn {
+  appearance: none;
+  border-radius: 12px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.pm-order-sell-ghost {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+}
+
+.pm-order-sell-btn {
+  border: 0;
+  background: linear-gradient(135deg, #111827 0%, #2563eb 100%);
+  color: #fff;
+}
+
+.pm-order-sell-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .pm-board-pagination {
   display: flex;
   justify-content: center;
