@@ -1239,7 +1239,184 @@ function PolymarketApp({ baseUrl, balance }) {
       ) : null}
       {loading ? <div className="pm-empty">正在加载数据...</div> : null}
 
-      {!loading && !error && filteredCurrentList.length > 0 ? (
+      {!loading && !error && activeTab === "markets" ? (
+        <section className="pm-board-market-layout">
+          <div className="pm-board-market-main">
+            {filteredCurrentList.length > 0 ? (
+              <section className="pm-board-grid">
+                {filteredCurrentList.map((item, index) => {
+                  const prices = Array.isArray(item.latestPrices) && item.latestPrices.length > 0
+                    ? item.latestPrices
+                    : buildLatestPrices(data.prices, item.pmMarketId);
+                  const latestUpdateAt = getLatestPriceUpdateAt(prices);
+                  const rows = getOutcomeRows({ ...item, latestPrices: prices });
+                  const cardMeta = getCardMeta(item);
+                  const closedMarket = isClosedStatus(item.status);
+                  return (
+                    <article
+                      className={selectedMarketId === item.pmMarketId ? "pm-board-card selected" : "pm-board-card"}
+                      key={item.pmMarketId || item.id || index}
+                      onClick={() => handleMarketClick(item.pmMarketId)}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <div className="pm-board-card-top">
+                        <div className="pm-board-card-title-wrap">
+                          <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
+                          <div className="pm-board-card-meta">
+                            {cardMeta.volumeLabel ? `交易额 ${cardMeta.volumeLabel}` : "交易额 -"} {cardMeta.dateLabel ? `· ${cardMeta.dateLabel}` : ""} {latestUpdateAt ? `· 更新于 ${formatBeijingTime(latestUpdateAt)}` : ""}
+                          </div>
+                        </div>
+                        <div className={`pm-board-status ${closedMarket ? "closed" : ""}`}>
+                          {formatStatusLabel(item.status || "ACTIVE")}
+                        </div>
+                      </div>
+                      <div className="pm-board-rows">
+                        {rows.slice(0, 4).map((row) => {
+                          const selectedOutcome =
+                            selectedMarketId === item.pmMarketId && Number(row.outcomeIndex) === Number(selectedTradeRow?.outcomeIndex);
+                          return (
+                            <button
+                              type="button"
+                              className={selectedOutcome ? "pm-board-row is-selected" : "pm-board-row"}
+                              key={row.key}
+                              onClick={(e) => handleTradeOutcomeClick(e, item.pmMarketId, row.outcomeIndex)}
+                              disabled={closedMarket}
+                            >
+                              <div className="pm-board-row-main">
+                                <div className="pm-board-row-name">{translateDynamicText(row.label)}</div>
+                                <div className="pm-board-row-sub">{formatOutcomeLabel(row.rawLabel)}</div>
+                              </div>
+                              <div className="pm-board-row-price">{closedMarket ? "-" : formatCentPrice(extractOutcomeQuote(item, row.outcomeIndex, "BUY"))}</div>
+                              <div className="pm-board-row-prob">{closedMarket ? "-" : formatProbability(row.price)}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </article>
+                  );
+                })}
+              </section>
+            ) : (
+              <div className="pm-empty">当前没有可展示的数据。</div>
+            )}
+            <div ref={marketLoadMoreRef} className="pm-board-scroll-sentinel" aria-hidden="true" />
+          </div>
+          <aside className="pm-trade-panel-wrap">
+            {selectedMarket && selectedTradeRow ? (
+              <section className="pm-trade-panel">
+                <div className="pm-trade-panel-head">
+                  <div className="pm-trade-tabs">
+                    <button
+                      type="button"
+                      className={tradeSide === "BUY" ? "pm-trade-tab active" : "pm-trade-tab"}
+                      onClick={() => setTradeSide("BUY")}
+                    >
+                      买入
+                    </button>
+                    <button
+                      type="button"
+                      className={tradeSide === "SELL" ? "pm-trade-tab active" : "pm-trade-tab"}
+                      onClick={() => setTradeSide("SELL")}
+                    >
+                      卖出
+                    </button>
+                  </div>
+                  <div className="pm-trade-market-tag">盘口</div>
+                </div>
+                <div className="pm-trade-title">{getCardTitle(selectedMarket)}</div>
+                <div className="pm-trade-options">
+                  {selectedMarketRows.map((row) => {
+                    const active = Number(row.outcomeIndex) === Number(selectedTradeRow.outcomeIndex);
+                    return (
+                      <button
+                        key={`trade-${row.key}`}
+                        type="button"
+                        className={active ? "pm-trade-option active" : "pm-trade-option"}
+                        onClick={() => setTradeOutcomeIndex(row.outcomeIndex)}
+                      >
+                        <span>{formatOutcomeLabel(row.rawLabel)}</span>
+                        <strong>{formatCentPrice(extractOutcomeQuote(selectedMarket, row.outcomeIndex, tradeSide))}</strong>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="pm-trade-amount-wrap">
+                  <div className="pm-trade-amount-head">
+                    <div className="pm-trade-label">金额</div>
+                    <div className="pm-trade-amount">${tradeAmountNumber > 0 ? tradeAmountNumber.toFixed(0) : "0"}</div>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={tradeAmount}
+                    onChange={(e) => setTradeAmount(e.target.value)}
+                    className="pm-trade-input"
+                    placeholder="输入金额"
+                  />
+                  <div className="pm-trade-quick-actions">
+                    {[1, 5, 10, 100].map((value) => (
+                      <button key={value} type="button" className="pm-trade-quick-btn" onClick={() => setTradeAmount(String(Math.max(0, tradeAmountNumber) + value))}>
+                        +${value}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      className="pm-trade-quick-btn"
+                      onClick={() => setTradeAmount(String(tradeSide === "SELL" ? Math.max(0, Math.floor(maxClosableAmount)) : Math.max(0, Math.floor(availableBalance))))}
+                    >
+                      最大
+                    </button>
+                  </div>
+                </div>
+                <div className="pm-trade-summary">
+                  <div>
+                    <div className="pm-trade-summary-label">{tradeSide === "BUY" ? "赢取" : "卖出回收"}</div>
+                    <div className="pm-trade-summary-sub">
+                      当前价格 {formatCentPrice(currentTradePrice)} · {tradeSide === "BUY" ? `约 ${estimatedShares.toFixed(2)} 份` : `持仓 ${Number(marketPosition?.size || 0).toFixed(4)} 份`}
+                    </div>
+                  </div>
+                  <div className="pm-trade-summary-value">
+                    ${tradeSide === "BUY" ? potentialReturn.toFixed(2) : tradeAmountNumber.toFixed(2)}
+                  </div>
+                </div>
+                {tradeSide === "SELL" ? (
+                  <div className="pm-trade-position-note">
+                    持仓均价 {formatCentPrice(marketPosition?.avgEntryPrice)} · 浮盈 {marketPosition?.unrealizedPnL != null ? `$${Number(marketPosition.unrealizedPnL).toFixed(2)}` : "$0.00"}
+                  </div>
+                ) : (
+                  <div className="pm-trade-position-note">
+                    买入按当前实时赔率成交，提交后会立即按最新价格写入订单。
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="pm-trade-submit"
+                  onClick={handleOrderSubmit}
+                  disabled={
+                    orderSubmitting ||
+                    currentTradePrice <= 0 ||
+                    tradeAmountNumber <= 0 ||
+                    (tradeSide === "BUY" && tradeAmountNumber > availableBalance) ||
+                    (tradeSide === "SELL" && (!marketPosition?.size || maxClosableAmount <= 0 || tradeAmountNumber > maxClosableAmount))
+                  }
+                >
+                  {orderSubmitting ? "提交中..." : "交易"}
+                </button>
+                <div className="pm-trade-footnote">交易即表示你同意使用条款。</div>
+              </section>
+            ) : (
+              <section className="pm-trade-panel pm-trade-panel-empty">
+                <div className="pm-trade-empty-title">选择一个市场开始交易</div>
+                <div className="pm-trade-empty-text">左侧点击任意市场选项后，右侧会按实时 WS 价格展示买入/卖出面板。</div>
+              </section>
+            )}
+          </aside>
+        </section>
+      ) : null}
+
+      {!loading && !error && activeTab !== "markets" && filteredCurrentList.length > 0 ? (
         <section className="pm-board-grid">
           {filteredCurrentList.map((item, index) => {
             if (activeTab === "orders") {
@@ -1256,7 +1433,7 @@ function PolymarketApp({ baseUrl, balance }) {
                       {formatStatusLabel(item.settleStatus || "OPEN")}
                     </div>
                   </div>
-                    <div className="pm-board-order-grid">
+                  <div className="pm-board-order-grid">
                     <div className="pm-board-order-cell">
                       <span>下单金额</span>
                       <strong>{item.orderAmount || 0} {item.currency || "USDT"}</strong>
@@ -1265,114 +1442,51 @@ function PolymarketApp({ baseUrl, balance }) {
                       <span>下单概率</span>
                       <strong>{item.orderPrice ? formatProbability(item.orderPrice) : "-"}</strong>
                     </div>
-                      <div className="pm-board-order-cell">
-                        <span>市场</span>
-                        <strong>{item.pmMarketId || "-"}</strong>
-                      </div>
-                      <div className="pm-board-order-cell">
-                        <span>{String(item.settleStatus || "").toUpperCase() === "SETTLED" || String(item.settleStatus || "").toUpperCase() === "WIN" || String(item.settleStatus || "").toUpperCase() === "LOSE" ? "结算时间" : "预计结算"}</span>
-                        <strong>{formatSettlementDateLabel(item)}</strong>
-                      </div>
-                      <div className="pm-board-order-cell">
-                        <span>结算盈亏</span>
-                        <strong>{item.settlePnl != null ? `${item.settlePnl > 0 ? "+" : ""}${item.settlePnl}` : "-"}</strong>
-                      </div>
-                    </div>
-                </article>
-              );
-            }
-
-            if (activeTab === "results") {
-              return (
-                <article className="pm-board-card" key={item.pmMarketId || item.marketId || index}>
-                  <div className="pm-board-card-top">
-                    <div className="pm-board-card-title-wrap">
-                      <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
-                      <div className="pm-board-card-meta">
-                        北京时间 {formatBeijingTime(item.resolvedAt)} · {translateCategoryLabel(item.category || selectedCategory || "-")}
-                      </div>
-                    </div>
-                    <div className="pm-board-status win">{formatOutcomeLabel(item.resolvedOutcome) || "已结算"}</div>
-                  </div>
-                  <div className="pm-board-order-grid">
                     <div className="pm-board-order-cell">
-                      <span>结算结果</span>
-                      <strong>{formatOutcomeLabel(item.resolvedOutcome) || "-"}</strong>
-                    </div>
-                    <div className="pm-board-order-cell">
-                      <span>结算值</span>
-                      <strong>{item.resolvedValue || "-"}</strong>
-                    </div>
-                    <div className="pm-board-order-cell">
-                      <span>市场ID</span>
+                      <span>市场</span>
                       <strong>{item.pmMarketId || "-"}</strong>
                     </div>
                     <div className="pm-board-order-cell">
-                      <span>来源</span>
-                      <strong>{item.resolutionSource || "-"}</strong>
+                      <span>{String(item.settleStatus || "").toUpperCase() === "SETTLED" || String(item.settleStatus || "").toUpperCase() === "WIN" || String(item.settleStatus || "").toUpperCase() === "LOSE" ? "结算时间" : "预计结算"}</span>
+                      <strong>{formatSettlementDateLabel(item)}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>结算盈亏</span>
+                      <strong>{item.settlePnl != null ? `${item.settlePnl > 0 ? "+" : ""}${item.settlePnl}` : "-"}</strong>
                     </div>
                   </div>
                 </article>
               );
             }
 
-            const prices = Array.isArray(item.latestPrices) && item.latestPrices.length > 0
-              ? item.latestPrices
-              : buildLatestPrices(data.prices, item.pmMarketId);
-            const latestUpdateAt = getLatestPriceUpdateAt(prices);
-            const rows = getOutcomeRows({ ...item, latestPrices: prices });
-            const cardMeta = getCardMeta(item);
-            const closedMarket = isClosedStatus(item.status);
             return (
-              <article
-                className={selectedMarketId === item.pmMarketId ? "pm-board-card selected" : "pm-board-card"}
-                key={item.pmMarketId || item.id || index}
-                onClick={() => handleMarketClick(item.pmMarketId)}
-                role="button"
-                tabIndex={0}
-              >
+              <article className="pm-board-card" key={item.pmMarketId || item.marketId || index}>
                 <div className="pm-board-card-top">
                   <div className="pm-board-card-title-wrap">
                     <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
                     <div className="pm-board-card-meta">
-                      {cardMeta.volumeLabel ? `交易额 ${cardMeta.volumeLabel}` : "交易额 -"} {cardMeta.dateLabel ? `· ${cardMeta.dateLabel}` : ""} {latestUpdateAt ? `· 更新于 ${formatBeijingTime(latestUpdateAt)}` : ""}
+                      北京时间 {formatBeijingTime(item.resolvedAt)} · {translateCategoryLabel(item.category || selectedCategory || "-")}
                     </div>
                   </div>
-                  <div className={`pm-board-status ${closedMarket ? "closed" : ""}`}>
-                    {formatStatusLabel(item.status || "ACTIVE")}
-                  </div>
+                  <div className="pm-board-status win">{formatOutcomeLabel(item.resolvedOutcome) || "已结算"}</div>
                 </div>
-                <div className="pm-board-rows">
-                  {rows.slice(0, 4).map((row) => (
-                    <div className="pm-board-row" key={row.key}>
-                      <div className="pm-board-row-name">{translateDynamicText(row.label)}</div>
-                      <div className="pm-board-row-prob">{closedMarket ? "-" : formatProbability(row.price)}</div>
-                      <div className="pm-board-row-actions">
-                        <button
-                          type="button"
-                          className="pm-board-action yes"
-                          onClick={(e) => handleTradeOutcomeClick(e, item.pmMarketId, row.outcomeIndex)}
-                          disabled={closedMarket}
-                        >
-                          {formatOutcomeLabel(row.rawLabel)}
-                        </button>
-                        <button
-                          type="button"
-                          className="pm-board-action no"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const fallbackIndex = rows.findIndex((candidate) => String(candidate.rawLabel || "").toLowerCase() === "no");
-                            if (fallbackIndex >= 0) {
-                              handleTradeOutcomeClick(e, item.pmMarketId, rows[fallbackIndex].outcomeIndex);
-                            }
-                          }}
-                          disabled={closedMarket || String(row.rawLabel || "").toLowerCase() === "no"}
-                        >
-                          否
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                <div className="pm-board-order-grid">
+                  <div className="pm-board-order-cell">
+                    <span>结算结果</span>
+                    <strong>{formatOutcomeLabel(item.resolvedOutcome) || "-"}</strong>
+                  </div>
+                  <div className="pm-board-order-cell">
+                    <span>结算值</span>
+                    <strong>{item.resolvedValue || "-"}</strong>
+                  </div>
+                  <div className="pm-board-order-cell">
+                    <span>市场ID</span>
+                    <strong>{item.pmMarketId || "-"}</strong>
+                  </div>
+                  <div className="pm-board-order-cell">
+                    <span>来源</span>
+                    <strong>{item.resolutionSource || "-"}</strong>
+                  </div>
                 </div>
               </article>
             );
@@ -1380,107 +1494,10 @@ function PolymarketApp({ baseUrl, balance }) {
         </section>
       ) : null}
 
-      {!loading && !error && filteredCurrentList.length === 0 ? (
+      {!loading && !error && activeTab !== "markets" && filteredCurrentList.length === 0 ? (
         <div className="pm-empty">
           {activeTab === "orders" ? (ordersLoading ? "加载订单中..." : "暂无订单记录") : activeTab === "results" ? (resultsLoading ? "加载历史记录中..." : "暂无历史记录") : "当前没有可展示的数据。"}
         </div>
-      ) : null}
-
-      {!loading && !error && activeTab === "markets" ? <div ref={marketLoadMoreRef} className="pm-board-scroll-sentinel" aria-hidden="true" /> : null}
-
-      {!loading && !error && activeTab === "markets" && selectedMarket && selectedTradeRow ? (
-        <section className="pm-trade-panel">
-          <div className="pm-trade-tabs">
-            <button
-              type="button"
-              className={tradeSide === "BUY" ? "pm-trade-tab active" : "pm-trade-tab"}
-              onClick={() => setTradeSide("BUY")}
-            >
-              买入
-            </button>
-            <button
-              type="button"
-              className={tradeSide === "SELL" ? "pm-trade-tab active" : "pm-trade-tab"}
-              onClick={() => setTradeSide("SELL")}
-            >
-              卖出
-            </button>
-          </div>
-          <div className="pm-trade-title">{getCardTitle(selectedMarket)}</div>
-          <div className="pm-trade-options">
-            {selectedMarketRows.map((row) => {
-              const active = Number(row.outcomeIndex) === Number(selectedTradeRow.outcomeIndex);
-              return (
-                <button
-                  key={`trade-${row.key}`}
-                  type="button"
-                  className={active ? "pm-trade-option active" : "pm-trade-option"}
-                  onClick={() => setTradeOutcomeIndex(row.outcomeIndex)}
-                >
-                  <span>{formatOutcomeLabel(row.rawLabel)}</span>
-                  <strong>{formatCentPrice(extractOutcomeQuote(selectedMarket, row.outcomeIndex, tradeSide))}</strong>
-                </button>
-              );
-            })}
-          </div>
-          <div className="pm-trade-amount-wrap">
-            <div className="pm-trade-label">金额</div>
-            <div className="pm-trade-amount">${tradeAmountNumber > 0 ? tradeAmountNumber.toFixed(0) : "0"}</div>
-            <input
-              type="number"
-              min="0"
-              step="1"
-              value={tradeAmount}
-              onChange={(e) => setTradeAmount(e.target.value)}
-              className="pm-trade-input"
-              placeholder="输入金额"
-            />
-            <div className="pm-trade-quick-actions">
-              {[1, 5, 10, 100].map((value) => (
-                <button key={value} type="button" className="pm-trade-quick-btn" onClick={() => setTradeAmount(String(Math.max(0, tradeAmountNumber) + value))}>
-                  +${value}
-                </button>
-              ))}
-              <button
-                type="button"
-                className="pm-trade-quick-btn"
-                onClick={() => setTradeAmount(String(tradeSide === "SELL" ? Math.max(0, Math.floor(maxClosableAmount)) : Math.max(0, Math.floor(availableBalance))))}
-              >
-                最大
-              </button>
-            </div>
-          </div>
-          <div className="pm-trade-summary">
-            <div>
-              <div className="pm-trade-summary-label">{tradeSide === "BUY" ? "赢取" : "卖出回收"}</div>
-              <div className="pm-trade-summary-sub">
-                Avg. Price {formatCentPrice(tradeSide === "BUY" ? currentTradePrice : marketPosition?.avgEntryPrice)}
-              </div>
-            </div>
-            <div className="pm-trade-summary-value">
-              ${tradeSide === "BUY" ? potentialReturn.toFixed(2) : tradeAmountNumber.toFixed(2)}
-            </div>
-          </div>
-          {tradeSide === "SELL" ? (
-            <div className="pm-trade-position-note">
-              当前持仓 {marketPosition?.size ? `${Number(marketPosition.size).toFixed(4)} 份` : "0 份"} · 浮盈 {marketPosition?.unrealizedPnL != null ? `$${Number(marketPosition.unrealizedPnL).toFixed(2)}` : "$0.00"}
-            </div>
-          ) : null}
-          <button
-            type="button"
-            className="pm-trade-submit"
-            onClick={handleOrderSubmit}
-            disabled={
-              orderSubmitting ||
-              currentTradePrice <= 0 ||
-              tradeAmountNumber <= 0 ||
-              (tradeSide === "BUY" && tradeAmountNumber > availableBalance) ||
-              (tradeSide === "SELL" && (!marketPosition?.size || maxClosableAmount <= 0 || tradeAmountNumber > maxClosableAmount))
-            }
-          >
-            {orderSubmitting ? "提交中..." : "交易"}
-          </button>
-        </section>
       ) : null}
 
       {!loading && !error && (
