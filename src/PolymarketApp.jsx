@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   fetchPolymarketCategories,
   fetchPolymarketMarkets,
+  fetchPolymarketPrices,
   fetchPolymarketGraph,
   createPolymarketOrder,
   fetchPolymarketMarketPosition,
@@ -572,28 +573,6 @@ function pickInitialCategory(categoryRows, requestedCategory = "") {
   return enabledCategories[0] || "";
 }
 
-function attachLatestPricesToMarkets(markets, plays) {
-  if (!Array.isArray(markets) || markets.length === 0) {
-    return [];
-  }
-  const priceMap = new Map();
-  (Array.isArray(plays) ? plays : []).forEach((play) => {
-    if (!play || !play.pmMarketId || !Array.isArray(play.latestPrices)) {
-      return;
-    }
-    if (!priceMap.has(play.pmMarketId)) {
-      priceMap.set(play.pmMarketId, play.latestPrices);
-    }
-  });
-  return markets.map((market) => {
-    if (!market || !market.pmMarketId) {
-      return market;
-    }
-    const latestPrices = priceMap.get(market.pmMarketId);
-    return latestPrices ? { ...market, latestPrices } : market;
-  });
-}
-
 function parseAssetIds(item) {
   const raw = parseMaybeJson(item?.assetIdsJson ?? item?.asset_ids_json ?? item?.assetIds ?? item?.asset_ids);
   if (Array.isArray(raw)) {
@@ -674,12 +653,6 @@ function PolymarketApp({ baseUrl, balance }) {
 
   const hydrateMarkets = useCallback((marketRows, append = false) => {
     const nextMarkets = Array.isArray(marketRows) ? marketRows : [];
-    const priceRows = nextMarkets.flatMap((item) => (Array.isArray(item?.latestPrices) ? item.latestPrices : []));
-    const latestPriceAt = getLatestPriceUpdateAt(priceRows);
-    if (latestPriceAt > 0) {
-      lastPriceUpdateRef.current = latestPriceAt;
-      setLastPriceRefreshAt(latestPriceAt);
-    }
     setData((prev) => {
       const mergedMarkets = append
         ? [
@@ -687,13 +660,9 @@ function PolymarketApp({ baseUrl, balance }) {
             ...nextMarkets.filter((item) => item?.pmMarketId && !prev.markets.some((row) => row?.pmMarketId === item.pmMarketId)),
           ]
         : nextMarkets;
-      const mergedPrices = append
-        ? [...prev.prices, ...priceRows.filter((item) => item && !prev.prices.some((row) => `${row.pmMarketId}:${row.outcomeIndex}` === `${item.pmMarketId}:${item.outcomeIndex}`))]
-        : priceRows;
       return {
         ...prev,
         markets: mergedMarkets,
-        prices: mergedPrices,
       };
     });
     setSelectedMarketId((prev) => {
@@ -769,13 +738,10 @@ function PolymarketApp({ baseUrl, balance }) {
       }
       setData((prev) => {
         const prices = upsertByKey(prev.prices, (row) => `${row.pmMarketId}:${row.outcomeIndex}`, patch);
-        const next = {
+        return {
           ...prev,
           prices,
         };
-        const latestPrices = buildLatestPrices(prices, patch.pmMarketId);
-        next.markets = prev.markets.map((item) => (item.pmMarketId === patch.pmMarketId ? { ...item, latestPrices } : item));
-        return next;
       });
       setOrders((prev) => prev.map((item) => {
         if (!item || item.pmMarketId !== patch.pmMarketId) {
@@ -892,9 +858,14 @@ function PolymarketApp({ baseUrl, balance }) {
     eventIds.forEach((eventId) => subscribeEvent(eventId));
   }, [data.markets, subscribeEvent, wsConnected]);
 
-  const selectedMarket = useMemo(() => (
-    (Array.isArray(data.markets) ? data.markets : []).find((item) => item && item.pmMarketId === selectedMarketId) || null
-  ), [data.markets, selectedMarketId]);
+  const selectedMarket = useMemo(() => {
+    const market = (Array.isArray(data.markets) ? data.markets : []).find((item) => item && item.pmMarketId === selectedMarketId) || null;
+    if (!market) {
+      return null;
+    }
+    const latestPrices = buildLatestPrices(data.prices, selectedMarketId);
+    return latestPrices.length > 0 ? { ...market, latestPrices } : market;
+  }, [data.markets, data.prices, selectedMarketId]);
   const graphSvg = useMemo(() => buildGraphSeriesSvg(Array.isArray(graphData?.series) ? graphData.series : []), [graphData]);
   const selectedMarketRows = useMemo(() => (
     selectedMarket ? getOutcomeRows(selectedMarket) : []
@@ -939,6 +910,36 @@ function PolymarketApp({ baseUrl, balance }) {
           setMarketPosition(null);
         }
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, selectedMarketId]);
+
+  useEffect(() => {
+    if (!selectedMarketId) {
+      return;
+    }
+    let cancelled = false;
+    fetchPolymarketPrices(baseUrl, { page: 1, size: 20, pmMarketId: selectedMarketId })
+      .then((res) => {
+        if (cancelled) {
+          return;
+        }
+        const rows = Array.isArray(res?.data) ? res.data : [];
+        const latestPriceAt = getLatestPriceUpdateAt(rows);
+        if (latestPriceAt > 0) {
+          lastPriceUpdateRef.current = latestPriceAt;
+          setLastPriceRefreshAt(latestPriceAt);
+        }
+        setData((prev) => {
+          const otherRows = (Array.isArray(prev.prices) ? prev.prices : []).filter((row) => row?.pmMarketId !== selectedMarketId);
+          return {
+            ...prev,
+            prices: [...otherRows, ...rows],
+          };
+        });
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -1336,11 +1337,7 @@ function PolymarketApp({ baseUrl, balance }) {
             {filteredCurrentList.length > 0 ? (
               <section className="pm-board-grid">
                 {filteredCurrentList.map((item, index) => {
-                  const prices = Array.isArray(item.latestPrices) && item.latestPrices.length > 0
-                    ? item.latestPrices
-                    : buildLatestPrices(data.prices, item.pmMarketId);
-                  const latestUpdateAt = getLatestPriceUpdateAt(prices);
-                  const rows = getOutcomeRows({ ...item, latestPrices: prices });
+                  const rows = getOutcomeRows(item);
                   const cardMeta = getCardMeta(item);
                   const closedMarket = isClosedStatus(item.status);
                   return (
@@ -1355,7 +1352,7 @@ function PolymarketApp({ baseUrl, balance }) {
                         <div className="pm-board-card-title-wrap">
                           <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
                           <div className="pm-board-card-meta">
-                            {cardMeta.volumeLabel ? `交易额 ${cardMeta.volumeLabel}` : "交易额 -"} {cardMeta.dateLabel ? `· ${cardMeta.dateLabel}` : ""} {latestUpdateAt ? `· 更新于 ${formatBeijingTime(latestUpdateAt)}` : ""}
+                            {cardMeta.volumeLabel ? `交易额 ${cardMeta.volumeLabel}` : "交易额 -"} {cardMeta.dateLabel ? `· ${cardMeta.dateLabel}` : ""} {item?.pmEventId ? `· 事件 ${item.pmEventId}` : ""}
                           </div>
                         </div>
                         <div className={`pm-board-status ${closedMarket ? "closed" : ""}`}>
@@ -1363,26 +1360,19 @@ function PolymarketApp({ baseUrl, balance }) {
                         </div>
                       </div>
                       <div className="pm-board-rows">
-                        {rows.slice(0, 4).map((row) => {
-                          const selectedOutcome =
-                            selectedMarketId === item.pmMarketId && Number(row.outcomeIndex) === Number(selectedTradeRow?.outcomeIndex);
-                          return (
-                            <button
-                              type="button"
-                              className={selectedOutcome ? "pm-board-row is-selected" : "pm-board-row"}
-                              key={row.key}
-                              onClick={(e) => handleTradeOutcomeClick(e, item.pmMarketId, row.outcomeIndex)}
-                              disabled={closedMarket}
-                            >
-                              <div className="pm-board-row-main">
-                                <div className="pm-board-row-name">{translateDynamicText(row.label)}</div>
-                                <div className="pm-board-row-sub">{formatOutcomeLabel(row.rawLabel)}</div>
-                              </div>
-                              <div className="pm-board-row-price">{closedMarket ? "-" : formatCentPrice(extractOutcomeQuote(item, row.outcomeIndex, "BUY"))}</div>
-                              <div className="pm-board-row-prob">{closedMarket ? "-" : formatProbability(row.price)}</div>
-                            </button>
-                          );
-                        })}
+                        <div className="pm-board-row static">
+                          <div className="pm-board-row-main">
+                            <div className="pm-board-row-name">市场 ID</div>
+                            <div className="pm-board-row-sub">{item?.pmMarketId || "-"}</div>
+                          </div>
+                          <div className="pm-board-row-prob">{rows.length ? `${rows.length} 个选项` : "暂无选项"}</div>
+                        </div>
+                        <div className="pm-board-row static">
+                          <div className="pm-board-row-main">
+                            <div className="pm-board-row-name">描述</div>
+                            <div className="pm-board-row-sub">{translateDynamicText(item?.description || "点击查看交易面板")}</div>
+                          </div>
+                        </div>
                       </div>
                     </article>
                   );
