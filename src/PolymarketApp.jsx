@@ -1360,19 +1360,26 @@ function PolymarketApp({ baseUrl, balance }) {
                         </div>
                       </div>
                       <div className="pm-board-rows">
-                        <div className="pm-board-row static">
-                          <div className="pm-board-row-main">
-                            <div className="pm-board-row-name">市场 ID</div>
-                            <div className="pm-board-row-sub">{item?.pmMarketId || "-"}</div>
-                          </div>
-                          <div className="pm-board-row-prob">{rows.length ? `${rows.length} 个选项` : "暂无选项"}</div>
-                        </div>
-                        <div className="pm-board-row static">
-                          <div className="pm-board-row-main">
-                            <div className="pm-board-row-name">描述</div>
-                            <div className="pm-board-row-sub">{translateDynamicText(item?.description || "点击查看交易面板")}</div>
-                          </div>
-                        </div>
+                        {rows.slice(0, 4).map((row) => {
+                          const selectedOutcome =
+                            selectedMarketId === item.pmMarketId && Number(row.outcomeIndex) === Number(selectedTradeRow?.outcomeIndex);
+                          return (
+                            <button
+                              type="button"
+                              className={selectedOutcome ? "pm-board-row is-selected" : "pm-board-row"}
+                              key={row.key}
+                              onClick={(e) => handleTradeOutcomeClick(e, item.pmMarketId, row.outcomeIndex)}
+                              disabled={closedMarket}
+                            >
+                              <div className="pm-board-row-main">
+                                <div className="pm-board-row-name">{translateDynamicText(row.label)}</div>
+                                <div className="pm-board-row-sub">{formatOutcomeLabel(row.rawLabel)}</div>
+                              </div>
+                              <div className="pm-board-row-price">{closedMarket ? "-" : formatCentPrice(row.price)}</div>
+                              <div className="pm-board-row-prob">{closedMarket ? "-" : formatProbability(row.price)}</div>
+                            </button>
+                          );
+                        })}
                       </div>
                     </article>
                   );
