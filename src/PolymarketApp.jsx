@@ -378,6 +378,12 @@ function formatCentPrice(value) {
   return `${Math.round(num * 100)}¢`;
 }
 
+function formatSellQuote(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return "暂无买盘";
+  return `${Math.round(num * 100)}¢`;
+}
+
 function getRemainingOrderSize(order) {
   const candidates = [order?.remainingSize, order?.filledSize, order?.orderSize];
   for (const candidate of candidates) {
@@ -1550,13 +1556,13 @@ function PolymarketApp({ baseUrl, balance }) {
                     </div>
                     <div className="pm-board-order-cell">
                       <span>当前卖价</span>
-                      <strong>{currentPrice > 0 ? formatCentPrice(currentPrice) : "-"}</strong>
+                      <strong>{formatSellQuote(currentPrice)}</strong>
                     </div>
                   </div>
                   {canManualClose ? (
                     <div className="pm-order-sell-box">
                       <div className="pm-order-sell-meta">
-                        <div>最多可卖 {maxSellAmount.toFixed(2)} {item.currency || "USDC"}</div>
+                        <div>{currentPrice > 0 ? `最多可卖 ${maxSellAmount.toFixed(2)} ${item.currency || "USDC"}` : "当前暂无买盘，暂时不能卖出"}</div>
                         <div>均价 {item.orderPrice ? formatCentPrice(item.orderPrice) : "-"} · 公式：卖出盈亏 = 卖出份额 × (卖价 - 买价)</div>
                       </div>
                       <div className="pm-order-sell-actions">
@@ -1567,19 +1573,21 @@ function PolymarketApp({ baseUrl, balance }) {
                           className="pm-order-sell-input"
                           value={sellDraft}
                           onChange={(e) => handleOrderSellDraftChange(item.orderNo, e.target.value)}
-                          placeholder="输入卖出金额"
+                          placeholder={currentPrice > 0 ? "输入卖出份额" : "暂无买盘"}
+                          disabled={currentPrice <= 0}
                         />
                         <button
                           type="button"
                           className="pm-order-sell-ghost"
-                          onClick={() => handleOrderSellDraftChange(item.orderNo, maxSellAmount > 0 ? maxSellAmount.toFixed(2) : "")}
+                          onClick={() => handleOrderSellDraftChange(item.orderNo, remainingSize > 0 ? remainingSize.toFixed(4) : "")}
+                          disabled={currentPrice <= 0}
                         >
                           最大
                         </button>
                         <button
                           type="button"
                           className="pm-order-sell-btn"
-                          disabled={orderSubmitting || !(Number(sellDraft) > 0)}
+                          disabled={orderSubmitting || currentPrice <= 0 || !(Number(sellDraft) > 0)}
                           onClick={() => handleOrderSell(item)}
                         >
                           {orderSubmitting ? "卖出中..." : "卖出"}
