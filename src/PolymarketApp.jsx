@@ -1206,7 +1206,10 @@ function PolymarketApp({ baseUrl, balance }) {
       alert("当前卖价不可用");
       return;
     }
-    const draftSize = sellMode === "amount" ? draftValue / currentPrice : draftValue;
+    let draftSize = sellMode === "amount" ? draftValue / currentPrice : draftValue;
+    if (draftSize > remainingSize && draftSize - remainingSize <= 1e-6) {
+      draftSize = remainingSize;
+    }
     if (draftSize > remainingSize + 1e-8) {
       alert(sellMode === "amount"
         ? `卖出金额超过可卖上限，当前最多可卖 ${maxAmount.toFixed(2)} ${order.currency || "USDC"}`
@@ -1607,6 +1610,10 @@ function PolymarketApp({ baseUrl, balance }) {
                       <strong>{item.orderAmount || 0} {item.currency || "USDT"}</strong>
                     </div>
                     <div className="pm-board-order-cell">
+                      <span>下单价格</span>
+                      <strong>{item.orderPrice ? formatCentPrice(item.orderPrice) : "-"}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
                       <span>下单概率</span>
                       <strong>{item.orderPrice ? formatProbability(item.orderPrice) : "-"}</strong>
                     </div>
@@ -1629,6 +1636,10 @@ function PolymarketApp({ baseUrl, balance }) {
                     <div className="pm-board-order-cell">
                       <span>当前卖价</span>
                       <strong>{formatSellQuote(currentPrice)}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>卖出价格</span>
+                      <strong>{item.sellPrice ? formatSellQuote(Number(item.sellPrice || 0)) : "-"}</strong>
                     </div>
                   </div>
                   {canManualClose ? (
@@ -1676,8 +1687,8 @@ function PolymarketApp({ baseUrl, balance }) {
                           onClick={() => handleOrderSellDraftChange(
                             item.orderNo,
                             sellMode === "amount"
-                              ? (maxSellAmount > 0 ? maxSellAmount.toFixed(2) : "")
-                              : (remainingSize > 0 ? remainingSize.toFixed(4) : "")
+                              ? (maxSellAmount > 0 ? maxSellAmount.toFixed(8) : "")
+                              : (remainingSize > 0 ? remainingSize.toFixed(8) : "")
                           )}
                           disabled={currentPrice <= 0}
                         >
