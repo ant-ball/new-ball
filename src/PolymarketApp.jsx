@@ -613,6 +613,7 @@ function PolymarketApp({ baseUrl, balance }) {
   const [marketPosition, setMarketPosition] = useState(null);
   const [orders, setOrders] = useState([]);
   const [orderSellDrafts, setOrderSellDrafts] = useState({});
+  const [orderSellModes, setOrderSellModes] = useState({});
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersPage, setOrdersPage] = useState(1);
   const [ordersHasMore, setOrdersHasMore] = useState(false);
@@ -1129,6 +1130,17 @@ function PolymarketApp({ baseUrl, balance }) {
     }));
   }, []);
 
+  const handleOrderSellModeChange = useCallback((orderNo, mode) => {
+    setOrderSellModes((prev) => ({
+      ...prev,
+      [orderNo]: mode,
+    }));
+    setOrderSellDrafts((prev) => ({
+      ...prev,
+      [orderNo]: "",
+    }));
+  }, []);
+
   const handleOrderSell = useCallback(async (order) => {
     if (!order || !order.orderNo) {
       return;
@@ -1136,17 +1148,21 @@ function PolymarketApp({ baseUrl, balance }) {
     const currentPrice = Number(order.currentPrice || 0);
     const remainingSize = getRemainingOrderSize(order);
     const maxAmount = currentPrice > 0 ? remainingSize * currentPrice : 0;
+    const sellMode = orderSellModes[order.orderNo] === "amount" ? "amount" : "size";
     const draftValue = Number(orderSellDrafts[order.orderNo] || 0);
     if (!(draftValue > 0)) {
-      alert("请输入卖出金额");
+      alert(sellMode === "amount" ? "请输入卖出金额" : "请输入卖出份额");
       return;
     }
     if (!(currentPrice > 0)) {
       alert("当前卖价不可用");
       return;
     }
-    if (draftValue > maxAmount + 1e-8) {
-      alert(`卖出金额超过可卖上限，当前最多可卖 ${maxAmount.toFixed(2)} USDC`);
+    const draftSize = sellMode === "amount" ? draftValue / currentPrice : draftValue;
+    if (draftSize > remainingSize + 1e-8) {
+      alert(sellMode === "amount"
+        ? `卖出金额超过可卖上限，当前最多可卖 ${maxAmount.toFixed(2)} ${order.currency || "USDC"}`
+        : `卖出份额超过可卖上限，当前最多可卖 ${remainingSize.toFixed(4)} 份`);
       return;
     }
     try {
@@ -1156,7 +1172,7 @@ function PolymarketApp({ baseUrl, balance }) {
         selectionCode: order.selectionCode,
         selectionName: order.selectionName,
         sourceOrderNo: order.orderNo,
-        size: draftValue / currentPrice,
+        size: draftSize,
         price: currentPrice,
       });
       setOrderSellDrafts((prev) => ({
@@ -1177,7 +1193,7 @@ function PolymarketApp({ baseUrl, balance }) {
     } finally {
       setOrderSubmitting(false);
     }
-  }, [baseUrl, loadOrders, orderSellDrafts, selectedMarket?.pmMarketId]);
+  }, [baseUrl, loadOrders, orderSellDrafts, orderSellModes, selectedMarket?.pmMarketId]);
 
   const loadResults = useCallback(async ({ page = 1, append = false } = {}) => {
     setResultsLoading(true);
@@ -1512,6 +1528,7 @@ function PolymarketApp({ baseUrl, balance }) {
               const remainingSize = getRemainingOrderSize(item);
               const maxSellAmount = currentPrice > 0 ? remainingSize * currentPrice : 0;
               const sellDraft = orderSellDrafts[item.orderNo] ?? "";
+              const sellMode = orderSellModes[item.orderNo] === "amount" ? "amount" : "size";
               const canManualClose = !!item.canManualClose && currentPrice > 0 && remainingSize > 0;
               return (
                 <article className="pm-board-card" key={item.orderNo || item.id || index}>
@@ -1559,8 +1576,30 @@ function PolymarketApp({ baseUrl, balance }) {
                   {canManualClose ? (
                     <div className="pm-order-sell-box">
                       <div className="pm-order-sell-meta">
-                        <div>{currentPrice > 0 ? `最多可卖 ${maxSellAmount.toFixed(2)} ${item.currency || "USDC"}` : "当前暂无买盘，暂时不能卖出"}</div>
+                        <div>
+                          {currentPrice > 0
+                            ? (sellMode === "amount"
+                              ? `最多可卖 ${maxSellAmount.toFixed(2)} ${item.currency || "USDC"}`
+                              : `最多可卖 ${remainingSize.toFixed(4)} 份`)
+                            : "当前暂无买盘，暂时不能卖出"}
+                        </div>
                         <div>均价 {item.orderPrice ? formatCentPrice(item.orderPrice) : "-"} · 公式：卖出盈亏 = 卖出份额 × (卖价 - 买价)</div>
+                      </div>
+                      <div className="pm-order-sell-mode">
+                        <button
+                          type="button"
+                          className={sellMode === "size" ? "pm-order-sell-mode-btn active" : "pm-order-sell-mode-btn"}
+                          onClick={() => handleOrderSellModeChange(item.orderNo, "size")}
+                        >
+                          按份额
+                        </button>
+                        <button
+                          type="button"
+                          className={sellMode === "amount" ? "pm-order-sell-mode-btn active" : "pm-order-sell-mode-btn"}
+                          onClick={() => handleOrderSellModeChange(item.orderNo, "amount")}
+                        >
+                          按USDT
+                        </button>
                       </div>
                       <div className="pm-order-sell-actions">
                         <input
@@ -1570,13 +1609,18 @@ function PolymarketApp({ baseUrl, balance }) {
                           className="pm-order-sell-input"
                           value={sellDraft}
                           onChange={(e) => handleOrderSellDraftChange(item.orderNo, e.target.value)}
-                          placeholder={currentPrice > 0 ? "输入卖出份额" : "暂无买盘"}
+                          placeholder={currentPrice > 0 ? (sellMode === "amount" ? "输入卖出金额" : "输入卖出份额") : "暂无买盘"}
                           disabled={currentPrice <= 0}
                         />
                         <button
                           type="button"
                           className="pm-order-sell-ghost"
-                          onClick={() => handleOrderSellDraftChange(item.orderNo, remainingSize > 0 ? remainingSize.toFixed(4) : "")}
+                          onClick={() => handleOrderSellDraftChange(
+                            item.orderNo,
+                            sellMode === "amount"
+                              ? (maxSellAmount > 0 ? maxSellAmount.toFixed(2) : "")
+                              : (remainingSize > 0 ? remainingSize.toFixed(4) : "")
+                          )}
                           disabled={currentPrice <= 0}
                         >
                           最大
