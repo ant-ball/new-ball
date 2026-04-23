@@ -878,6 +878,136 @@
   justify-content: center;
 }
 
+.pm-trade-detail-entry {
+  margin-top: 8px;
+}
+
+.pm-trade-detail-btn {
+  appearance: none;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.pm-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.pm-detail-modal {
+  width: min(840px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  background: #fff;
+  border-radius: 22px;
+  padding: 22px;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.24);
+  display: grid;
+  gap: 14px;
+}
+
+.pm-detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.pm-detail-kicker {
+  font-size: 12px;
+  font-weight: 800;
+  color: #2563eb;
+}
+
+.pm-detail-title {
+  margin: 6px 0 0;
+  font-size: 28px;
+  line-height: 1.25;
+  color: #0f172a;
+}
+
+.pm-detail-meta {
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pm-detail-close {
+  appearance: none;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.pm-detail-langs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pm-detail-lang {
+  appearance: none;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.pm-detail-lang.active {
+  color: #2563eb;
+  border-color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.pm-detail-block {
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 18px;
+  padding: 16px;
+  background: #f8fbff;
+}
+
+.pm-detail-label {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+.pm-detail-text {
+  color: #0f172a;
+  font-size: 15px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pm-detail-foot {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .pm-board-scroll-sentinel {
   width: 100%;
   height: 1px;

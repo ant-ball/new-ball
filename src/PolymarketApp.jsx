@@ -6,6 +6,7 @@ import {
   fetchPolymarketGraph,
   createPolymarketOrder,
   fetchPolymarketMarketPosition,
+  fetchPolymarketMarketTranslation,
   closePolymarketPosition,
   fetchPolymarketOrders,
   fetchPolymarketResults,
@@ -29,6 +30,13 @@ const GRAPH_RANGES = [
   { key: "all", label: "全部" },
 ];
 const GRAPH_COLORS = ["#f97316", "#dc2626", "#2563eb", "#16a34a", "#7c3aed", "#0f766e"];
+const DETAIL_LANGUAGES = [
+  { key: "zh-CN", label: "中文" },
+  { key: "id-ID", label: "印尼语" },
+  { key: "th-TH", label: "泰语" },
+  { key: "vi-VN", label: "越南语" },
+  { key: "en-US", label: "英文" },
+];
 
 const CATEGORY_LABELS = {
   global: "全球",
@@ -611,6 +619,10 @@ function PolymarketApp({ baseUrl, balance }) {
   const [tradeAmount, setTradeAmount] = useState("100");
   const [orderSubmitting, setOrderSubmitting] = useState(false);
   const [marketPosition, setMarketPosition] = useState(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLang, setDetailLang] = useState("zh-CN");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailTranslation, setDetailTranslation] = useState(null);
   const [orders, setOrders] = useState([]);
   const [orderSellDrafts, setOrderSellDrafts] = useState({});
   const [orderSellModes, setOrderSellModes] = useState({});
@@ -945,6 +957,33 @@ function PolymarketApp({ baseUrl, balance }) {
       cancelled = true;
     };
   }, [baseUrl, selectedMarketId]);
+
+  useEffect(() => {
+    if (!detailOpen || !selectedMarketId) {
+      return;
+    }
+    let cancelled = false;
+    setDetailLoading(true);
+    fetchPolymarketMarketTranslation(baseUrl, selectedMarketId, detailLang)
+      .then((res) => {
+        if (!cancelled) {
+          setDetailTranslation(res?.data || null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDetailTranslation(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setDetailLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, detailLang, detailOpen, selectedMarketId]);
 
   useEffect(() => {
     if (!selectedMarketRows.length) {
@@ -1429,6 +1468,15 @@ function PolymarketApp({ baseUrl, balance }) {
                   <div className="pm-trade-market-tag">盘口</div>
                 </div>
                 <div className="pm-trade-title">{getCardTitle(selectedMarket)}</div>
+                <div className="pm-trade-detail-entry">
+                  <button
+                    type="button"
+                    className="pm-trade-detail-btn"
+                    onClick={() => setDetailOpen(true)}
+                  >
+                    查看详情
+                  </button>
+                </div>
                 <div className="pm-trade-options">
                   {selectedMarketRows.map((row) => {
                     const active = Number(row.outcomeIndex) === Number(selectedTradeRow.outcomeIndex);
@@ -1695,6 +1743,64 @@ function PolymarketApp({ baseUrl, balance }) {
           ) : null}
         </div>
       )}
+
+      {detailOpen && selectedMarket ? (
+        <div className="pm-detail-overlay" onClick={() => setDetailOpen(false)}>
+          <section className="pm-detail-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="pm-detail-head">
+              <div>
+                <div className="pm-detail-kicker">市场详情</div>
+                <h3 className="pm-detail-title">{getCardTitle(selectedMarket)}</h3>
+                <div className="pm-detail-meta">
+                  市场 {selectedMarket.pmMarketId || "-"} · 事件 {selectedMarket.pmEventId || "-"}
+                </div>
+              </div>
+              <button type="button" className="pm-detail-close" onClick={() => setDetailOpen(false)}>关闭</button>
+            </div>
+            <div className="pm-detail-langs">
+              {DETAIL_LANGUAGES.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={detailLang === item.key ? "pm-detail-lang active" : "pm-detail-lang"}
+                  onClick={() => setDetailLang(item.key)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <div className="pm-detail-block">
+              <div className="pm-detail-label">标题</div>
+              <div className="pm-detail-text">
+                {detailLoading ? "翻译加载中..." : (detailTranslation?.question || selectedMarket.question || "-")}
+              </div>
+            </div>
+            <div className="pm-detail-block">
+              <div className="pm-detail-label">描述</div>
+              <div className="pm-detail-text">
+                {detailLoading ? "翻译加载中..." : (detailTranslation?.description || selectedMarket.description || "暂无描述")}
+              </div>
+            </div>
+            <div className="pm-detail-block">
+              <div className="pm-detail-label">选项</div>
+              <div className="pm-detail-text">
+                {detailLoading ? "翻译加载中..." : (() => {
+                  try {
+                    const raw = detailTranslation?.outcomesJson || selectedMarket.outcomesJson || "[]";
+                    const rows = typeof raw === "string" ? JSON.parse(raw) : raw;
+                    return Array.isArray(rows) && rows.length > 0 ? rows.join(" / ") : "暂无选项";
+                  } catch {
+                    return detailTranslation?.outcomesJson || selectedMarket.outcomesJson || "暂无选项";
+                  }
+                })()}
+              </div>
+            </div>
+            <div className="pm-detail-foot">
+              {detailTranslation?.translated ? `当前展示 ${detailLang} 翻译内容` : `当前无 ${detailLang} 翻译，已回退原文`}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

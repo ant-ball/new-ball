@@ -154,6 +154,12 @@ export async function fetchPolymarketMarketPosition(baseUrl, pmMarketId, selecti
   return { url, data: unwrapData(json) || null };
 }
 
+export async function fetchPolymarketMarketTranslation(baseUrl, pmMarketId, lang = "zh-CN") {
+  const query = `/polymarket/market-translation?pmMarketId=${encodeURIComponent(pmMarketId)}&lang=${encodeURIComponent(lang)}`;
+  const { url, json } = await requestJson(baseUrl, query);
+  return { url, data: unwrapData(json) || null };
+}
+
 export async function closePolymarketPosition(baseUrl, payload) {
   const { url, json } = await requestJson(baseUrl, "/polymarket/close-position", {
     method: "POST",
