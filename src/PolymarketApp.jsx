@@ -571,6 +571,12 @@ function buildLatestPrices(prices, pmMarketId) {
   return prices.filter((row) => row && row.pmMarketId === pmMarketId);
 }
 
+function attachLatestPrices(item, prices) {
+  if (!item) return item;
+  const latestPrices = buildLatestPrices(prices, item.pmMarketId);
+  return latestPrices.length > 0 ? { ...item, latestPrices } : item;
+}
+
 function pickInitialCategory(categoryRows, requestedCategory = "") {
   const enabledCategories = (Array.isArray(categoryRows) ? categoryRows : [])
     .filter((item) => item && item.category)
@@ -852,7 +858,7 @@ function PolymarketApp({ baseUrl, balance }) {
     loadCategoryMarkets({ category: selectedCategory, page: 1, append: false });
   }, [loadCategoryMarkets, selectedCategory]);
 
-  const { connected: wsConnected, subscribeEvent } = usePolymarketSocket({
+  const { connected: wsConnected, syncMarketSubscriptions } = usePolymarketSocket({
     baseUrl,
     enabled: true,
     onRefresh: applySocketPatch,
@@ -863,21 +869,24 @@ function PolymarketApp({ baseUrl, balance }) {
     if (!wsConnected) {
       return;
     }
-    const eventIds = Array.from(new Set(
-      (Array.isArray(data.markets) ? data.markets : [])
-        .map((item) => item?.pmEventId)
-        .filter(Boolean)
-    ));
-    eventIds.forEach((eventId) => subscribeEvent(eventId));
-  }, [data.markets, subscribeEvent, wsConnected]);
+    const currentPageMarketIds = (() => {
+      if (activeTab === "orders") {
+        return Array.from(new Set((Array.isArray(orders) ? orders : []).map((item) => item?.pmMarketId).filter(Boolean)));
+      }
+      if (activeTab === "results") {
+        return Array.from(new Set((Array.isArray(data.results) ? data.results : []).map((item) => item?.pmMarketId).filter(Boolean)));
+      }
+      return Array.from(new Set((Array.isArray(data.markets) ? data.markets : []).map((item) => item?.pmMarketId).filter(Boolean)));
+    })();
+    syncMarketSubscriptions(currentPageMarketIds);
+  }, [activeTab, data.markets, data.results, orders, syncMarketSubscriptions, wsConnected]);
 
   const selectedMarket = useMemo(() => {
     const market = (Array.isArray(data.markets) ? data.markets : []).find((item) => item && item.pmMarketId === selectedMarketId) || null;
     if (!market) {
       return null;
     }
-    const latestPrices = buildLatestPrices(data.prices, selectedMarketId);
-    return latestPrices.length > 0 ? { ...market, latestPrices } : market;
+    return attachLatestPrices(market, data.prices);
   }, [data.markets, data.prices, selectedMarketId]);
   const graphSvg = useMemo(() => buildGraphSeriesSvg(Array.isArray(graphData?.series) ? graphData.series : []), [graphData]);
   const selectedMarketRows = useMemo(() => (
@@ -1392,38 +1401,39 @@ function PolymarketApp({ baseUrl, balance }) {
             {filteredCurrentList.length > 0 ? (
               <section className="pm-board-grid">
                 {filteredCurrentList.map((item, index) => {
-                  const rows = getOutcomeRows(item);
+                  const displayItem = attachLatestPrices(item, data.prices);
+                  const rows = getOutcomeRows(displayItem);
                   const cardMeta = getCardMeta(item);
                   const closedMarket = isClosedStatus(item.status);
                   return (
                     <article
-                      className={selectedMarketId === item.pmMarketId ? "pm-board-card selected" : "pm-board-card"}
-                      key={item.pmMarketId || item.id || index}
-                      onClick={() => handleMarketClick(item.pmMarketId)}
+                          className={selectedMarketId === displayItem.pmMarketId ? "pm-board-card selected" : "pm-board-card"}
+                      key={displayItem.pmMarketId || displayItem.id || index}
+                      onClick={() => handleMarketClick(displayItem.pmMarketId)}
                       role="button"
                       tabIndex={0}
                     >
                       <div className="pm-board-card-top">
                         <div className="pm-board-card-title-wrap">
-                          <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
+                          <h3 className="pm-board-card-title">{getCardTitle(displayItem)}</h3>
                           <div className="pm-board-card-meta">
-                            {cardMeta.volumeLabel ? `交易额 ${cardMeta.volumeLabel}` : "交易额 -"} {cardMeta.dateLabel ? `· ${cardMeta.dateLabel}` : ""} {item?.pmEventId ? `· 事件 ${item.pmEventId}` : ""}
+                            {cardMeta.volumeLabel ? `交易额 ${cardMeta.volumeLabel}` : "交易额 -"} {cardMeta.dateLabel ? `· ${cardMeta.dateLabel}` : ""} {displayItem?.pmEventId ? `· 事件 ${displayItem.pmEventId}` : ""}
                           </div>
                         </div>
                         <div className={`pm-board-status ${closedMarket ? "closed" : ""}`}>
-                          {formatStatusLabel(item.status || "ACTIVE")}
+                          {formatStatusLabel(displayItem.status || "ACTIVE")}
                         </div>
                       </div>
                       <div className="pm-board-rows">
                         {rows.slice(0, 4).map((row) => {
                           const selectedOutcome =
-                            selectedMarketId === item.pmMarketId && Number(row.outcomeIndex) === Number(selectedTradeRow?.outcomeIndex);
+                            selectedMarketId === displayItem.pmMarketId && Number(row.outcomeIndex) === Number(selectedTradeRow?.outcomeIndex);
                           return (
                             <button
                               type="button"
                               className={selectedOutcome ? "pm-board-row is-selected" : "pm-board-row"}
                               key={row.key}
-                              onClick={(e) => handleTradeOutcomeClick(e, item.pmMarketId, row.outcomeIndex)}
+                              onClick={(e) => handleTradeOutcomeClick(e, displayItem.pmMarketId, row.outcomeIndex)}
                               disabled={closedMarket}
                             >
                               <div className="pm-board-row-main">

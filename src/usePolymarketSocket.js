@@ -23,11 +23,11 @@ function resolveWsUrl(baseUrl) {
 /**
  * Polymarket WebSocket hook
  * - 连接时自动订阅 polymarket-refresh
- * - 调用 subscribeEvent(eventId) 订阅指定 event 的价格推送
+ * - 调用 syncMarketSubscriptions(marketIds) 订阅当前页面 market 的价格推送
  */
 export function usePolymarketSocket({ baseUrl, enabled, onRefresh, onConnectedChange }) {
   const wsRef = useRef(null);
-  const subscribedEventsRef = useRef(new Set());
+  const subscribedMarketsRef = useRef(new Set());
   const onRefreshRef = useRef(onRefresh);
   const onConnectedChangeRef = useRef(onConnectedChange);
   const [connected, setConnected] = useState(false);
@@ -45,7 +45,7 @@ export function usePolymarketSocket({ baseUrl, enabled, onRefresh, onConnectedCh
       setConnected(false);
       const ws = wsRef.current;
       wsRef.current = null;
-      subscribedEventsRef.current.clear();
+      subscribedMarketsRef.current.clear();
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.close();
       }
@@ -121,7 +121,7 @@ export function usePolymarketSocket({ baseUrl, enabled, onRefresh, onConnectedCh
       cancelled = true;
       const current = wsRef.current;
       wsRef.current = null;
-      subscribedEventsRef.current.clear();
+      subscribedMarketsRef.current.clear();
       if (current && current.readyState === WebSocket.OPEN) {
         current.close();
       }
@@ -132,50 +132,29 @@ export function usePolymarketSocket({ baseUrl, enabled, onRefresh, onConnectedCh
     };
   }, [baseUrl, enabled]);
 
-  /**
-   * 订阅指定 event 的价格推送
-   * @param {string} eventId - polymarket event id
-   */
-  const subscribeEvent = useCallback((eventId) => {
-    if (!eventId) return;
+  const syncMarketSubscriptions = useCallback((marketIds) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.warn("[usePolymarketSocket] WS 未连接，无法订阅 event:", eventId);
+      console.warn("[usePolymarketSocket] WS 未连接，无法订阅 markets:", marketIds);
       return;
     }
-    if (subscribedEventsRef.current.has(eventId)) {
-      console.log("[usePolymarketSocket] 已订阅过 event:", eventId);
+    const nextMarkets = Array.isArray(marketIds)
+      ? marketIds.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    const currentMarkets = Array.from(subscribedMarketsRef.current);
+    if (currentMarkets.length === nextMarkets.length
+      && currentMarkets.every((item, index) => item === nextMarkets[index])) {
       return;
     }
-    subscribedEventsRef.current.add(eventId);
+    subscribedMarketsRef.current = new Set(nextMarkets);
     const token = getStoredBallToken();
     ws.send(JSON.stringify({
-      type: "subscribe_event",
-      pmEventId: eventId,
+      type: "subscribe_markets",
+      pmMarketIds: nextMarkets,
       token: token || "",
     }));
-    console.log("[usePolymarketSocket] 订阅 event:", eventId);
+    console.log("[usePolymarketSocket] 设置 market 订阅:", nextMarkets);
   }, []);
 
-  /**
-   * 取消订阅指定 event
-   * @param {string} eventId - polymarket event id
-   */
-  const unsubscribeEvent = useCallback((eventId) => {
-    if (!eventId) return;
-    const ws = wsRef.current;
-    subscribedEventsRef.current.delete(eventId);
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return;
-    }
-    const token = getStoredBallToken();
-    ws.send(JSON.stringify({
-      type: "unsubscribe_event",
-      pmEventId: eventId,
-      token: token || "",
-    }));
-    console.log("[usePolymarketSocket] 取消订阅 event:", eventId);
-  }, []);
-
-  return { connected, subscribeEvent, unsubscribeEvent };
+  return { connected, syncMarketSubscriptions };
 }
