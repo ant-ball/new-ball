@@ -115,6 +115,12 @@ export async function fetchPolymarketResults(baseUrl, page = 1, size = 20) {
   return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
 }
 
+export async function fetchPolymarketHistoryEvents(baseUrl, page = 1, size = 20, category = "") {
+  const suffix = category ? `&category=${encodeURIComponent(category)}` : "";
+  const { url, json } = await requestJson(baseUrl, `/polymarket/events/history?page=${page}&size=${size}${suffix}`);
+  return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
+}
+
 export async function syncPolymarketEvents(baseUrl) {
   const { url, json } = await requestJson(baseUrl, "/polymarket/sync/events?offset=0&limit=200", {
     method: "POST",
@@ -172,4 +178,18 @@ export async function closePolymarketPosition(baseUrl, payload) {
 export async function fetchPolymarketOrders(baseUrl, page = 1, size = 50) {
   const { url, json } = await requestJson(baseUrl, `/polymarket/orders?page=${page}&size=${size}`);
   return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
+}
+
+export async function fetchPolymarketPlayOrders(baseUrl, pmPlayId) {
+  const { url, json } = await requestJson(baseUrl, `/polymarket/play-orders?pmPlayId=${encodeURIComponent(pmPlayId)}`);
+  return { url, data: unwrapData(json) || [] };
+}
+
+export async function updatePolymarketPlayPin(baseUrl, payload) {
+  const { url, json } = await requestJson(baseUrl, "/polymarket/play-pin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return { url, data: unwrapData(json) || json };
 }

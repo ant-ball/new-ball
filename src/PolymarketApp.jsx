@@ -9,7 +9,9 @@ import {
   fetchPolymarketMarketTranslation,
   closePolymarketPosition,
   fetchPolymarketOrders,
-  fetchPolymarketResults,
+  fetchPolymarketHistoryEvents,
+  fetchPolymarketPlayOrders,
+  updatePolymarketPlayPin,
 } from "./polymarketApi";
 import { usePolymarketSocket } from "./usePolymarketSocket";
 
@@ -262,6 +264,12 @@ function getEventTitle(item) {
 
 function getCardTitle(item) {
   return translateDynamicText(item?.question || item?.description || item?.title || item?.slug || item?.selectionName || item?.selectionCode || item?.pmMarketId || "预测市场");
+}
+
+function getMarketImage(item) {
+  if (!item || typeof item !== "object") return "";
+  const value = item.displayImage || item.image || item.icon || "";
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function getVolumeValue(item) {
@@ -587,6 +595,22 @@ function pickInitialCategory(categoryRows, requestedCategory = "") {
   return enabledCategories[0] || "";
 }
 
+function sortMarketsByPinned(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  let pinnedMap = {};
+  try {
+    pinnedMap = JSON.parse(window.localStorage.getItem("polymarketPinnedPlays") || "{}") || {};
+  } catch {
+    pinnedMap = {};
+  }
+  return rows.slice().sort((left, right) => {
+    const leftPinned = pinnedMap[left?.pmMarketId] ? 1 : 0;
+    const rightPinned = pinnedMap[right?.pmMarketId] ? 1 : 0;
+    if (leftPinned !== rightPinned) return rightPinned - leftPinned;
+    return 0;
+  });
+}
+
 function parseAssetIds(item) {
   const raw = parseMaybeJson(item?.assetIdsJson ?? item?.asset_ids_json ?? item?.assetIds ?? item?.asset_ids);
   if (Array.isArray(raw)) {
@@ -630,6 +654,10 @@ function PolymarketApp({ baseUrl, balance }) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTranslation, setDetailTranslation] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [selectedPlayOrders, setSelectedPlayOrders] = useState([]);
+  const [selectedPlayOrdersLoading, setSelectedPlayOrdersLoading] = useState(false);
+  const [selectedPlayPinned, setSelectedPlayPinned] = useState(false);
+  const [pinSubmitting, setPinSubmitting] = useState(false);
   const [orderSellDrafts, setOrderSellDrafts] = useState({});
   const [orderSellModes, setOrderSellModes] = useState({});
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -679,9 +707,10 @@ function PolymarketApp({ baseUrl, balance }) {
             ...nextMarkets.filter((item) => item?.pmMarketId && !prev.markets.some((row) => row?.pmMarketId === item.pmMarketId)),
           ]
         : nextMarkets;
+      const sortedMarkets = sortMarketsByPinned(mergedMarkets);
       return {
         ...prev,
-        markets: mergedMarkets,
+        markets: sortedMarkets,
       };
     });
     setSelectedMarketId((prev) => {
@@ -939,6 +968,48 @@ function PolymarketApp({ baseUrl, balance }) {
 
   useEffect(() => {
     if (!selectedMarketId) {
+      setSelectedPlayOrders([]);
+      setSelectedPlayPinned(false);
+      return;
+    }
+    let cancelled = false;
+    setSelectedPlayOrdersLoading(true);
+    fetchPolymarketPlayOrders(baseUrl, selectedMarketId)
+      .then((res) => {
+        if (cancelled) return;
+        const rows = Array.isArray(res?.data) ? res.data : [];
+        setSelectedPlayOrders(rows);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSelectedPlayOrders([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSelectedPlayOrdersLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, selectedMarketId]);
+
+  useEffect(() => {
+    if (!selectedMarketId) {
+      setSelectedPlayPinned(false);
+      return;
+    }
+    try {
+      const cache = JSON.parse(window.localStorage.getItem("polymarketPinnedPlays") || "{}");
+      setSelectedPlayPinned(Boolean(cache?.[selectedMarketId]));
+    } catch {
+      setSelectedPlayPinned(false);
+    }
+  }, [selectedMarketId]);
+
+  useEffect(() => {
+    if (!selectedMarketId) {
       return;
     }
     let cancelled = false;
@@ -1085,6 +1156,36 @@ function PolymarketApp({ baseUrl, balance }) {
     }
     setSelectedMarketId(marketId);
   }, [selectedMarketId]);
+
+  const handleTogglePlayPin = useCallback(async () => {
+    if (!selectedMarketId || pinSubmitting) {
+      return;
+    }
+    const nextPinned = !selectedPlayPinned;
+    try {
+      setPinSubmitting(true);
+      await updatePolymarketPlayPin(baseUrl, {
+        pmPlayId: selectedMarketId,
+        pinned: nextPinned,
+      });
+      setSelectedPlayPinned(nextPinned);
+      try {
+        const cache = JSON.parse(window.localStorage.getItem("polymarketPinnedPlays") || "{}");
+        cache[selectedMarketId] = nextPinned;
+        window.localStorage.setItem("polymarketPinnedPlays", JSON.stringify(cache));
+      } catch {
+        // ignore cache errors
+      }
+      setData((prev) => ({
+        ...prev,
+        markets: sortMarketsByPinned(prev.markets),
+      }));
+    } catch (err) {
+      alert(`置顶失败: ${err?.message || "未知错误"}`);
+    } finally {
+      setPinSubmitting(false);
+    }
+  }, [baseUrl, pinSubmitting, selectedMarketId, selectedPlayPinned]);
 
   const handleTradeOutcomeClick = useCallback((e, marketId, outcomeIndex) => {
     e.stopPropagation();
@@ -1249,7 +1350,7 @@ function PolymarketApp({ baseUrl, balance }) {
   const loadResults = useCallback(async ({ page = 1, append = false } = {}) => {
     setResultsLoading(true);
     try {
-      const res = await fetchPolymarketResults(baseUrl, page, RESULT_PAGE_SIZE);
+      const res = await fetchPolymarketHistoryEvents(baseUrl, page, RESULT_PAGE_SIZE, selectedCategory);
       const rows = Array.isArray(res.data) ? res.data : [];
       const total = Number(res?.meta?.total ?? 0);
       setResultsPage(page);
@@ -1263,7 +1364,7 @@ function PolymarketApp({ baseUrl, balance }) {
     } finally {
       setResultsLoading(false);
     }
-  }, [baseUrl]);
+  }, [baseUrl, selectedCategory]);
 
   useEffect(() => {
     if (activeTab === "orders") {
@@ -1410,7 +1511,7 @@ function PolymarketApp({ baseUrl, balance }) {
                   const closedMarket = isClosedStatus(item.status);
                   return (
                     <article
-                          className={selectedMarketId === displayItem.pmMarketId ? "pm-board-card selected" : "pm-board-card"}
+                      className={selectedMarketId === displayItem.pmMarketId ? "pm-board-card selected" : "pm-board-card"}
                       key={displayItem.pmMarketId || displayItem.id || index}
                       onClick={() => handleMarketClick(displayItem.pmMarketId)}
                       role="button"
@@ -1418,11 +1519,25 @@ function PolymarketApp({ baseUrl, balance }) {
                     >
                       <div className="pm-board-card-top">
                         <div className="pm-board-card-title-wrap">
-                          <h3 className="pm-board-card-title">{getCardTitle(displayItem)}</h3>
+                          <div className="pm-board-card-title-row">
+                            {getMarketImage(displayItem) ? (
+                              <img
+                                src={getMarketImage(displayItem)}
+                                alt=""
+                                className="pm-board-card-avatar"
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : null}
+                            <h3 className="pm-board-card-title">{getCardTitle(displayItem)}</h3>
+                          </div>
                           <div className="pm-board-card-meta">
                             {cardMeta.volumeLabel ? `交易额 ${cardMeta.volumeLabel}` : "交易额 -"} {cardMeta.dateLabel ? `· ${cardMeta.dateLabel}` : ""} {displayItem?.pmEventId ? `· 事件 ${displayItem.pmEventId}` : ""}
                           </div>
                         </div>
+                        {selectedPlayPinned && selectedMarketId === displayItem.pmMarketId ? (
+                          <div className="pm-board-card-pin">已置顶</div>
+                        ) : null}
                         <div className={`pm-board-status ${closedMarket ? "closed" : ""}`}>
                           {formatStatusLabel(displayItem.status || "ACTIVE")}
                         </div>
@@ -1482,6 +1597,14 @@ function PolymarketApp({ baseUrl, balance }) {
                 </div>
                 <div className="pm-trade-title">{getCardTitle(selectedMarket)}</div>
                 <div className="pm-trade-detail-entry">
+                  <button
+                    type="button"
+                    className={selectedPlayPinned ? "pm-trade-pin-btn active" : "pm-trade-pin-btn"}
+                    onClick={handleTogglePlayPin}
+                    disabled={pinSubmitting}
+                  >
+                    {pinSubmitting ? "处理中..." : selectedPlayPinned ? "取消置顶" : "置顶玩法"}
+                  </button>
                   <button
                     type="button"
                     className="pm-trade-detail-btn"
@@ -1545,6 +1668,25 @@ function PolymarketApp({ baseUrl, balance }) {
                   <div className="pm-trade-summary-value">
                     ${tradeSide === "BUY" ? potentialReturn.toFixed(2) : tradeAmountNumber.toFixed(2)}
                   </div>
+                </div>
+                <div className="pm-trade-play-orders">
+                  <div className="pm-trade-play-orders-head">
+                    <span>当前玩法订单</span>
+                    <strong>{selectedPlayOrdersLoading ? "加载中..." : `${selectedPlayOrders.length} 笔`}</strong>
+                  </div>
+                  {selectedPlayOrders.length > 0 ? (
+                    <div className="pm-trade-play-orders-list">
+                      {selectedPlayOrders.slice(0, 3).map((order) => (
+                        <div className="pm-trade-play-order-row" key={order.orderNo || order.id}>
+                          <span>{formatOutcomeLabel(order.selectionName || order.selectionCode || "-")}</span>
+                          <span>{order.orderAmount || 0} {order.currency || "USDC"}</span>
+                          <span>{formatStatusLabel(order.settleStatus || order.orderStatus || "OPEN")}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="pm-trade-play-orders-empty">当前玩法暂无未结算订单</div>
+                  )}
                 </div>
                 {tradeSide === "SELL" ? (
                   <div className="pm-trade-position-note">
@@ -1710,32 +1852,32 @@ function PolymarketApp({ baseUrl, balance }) {
             }
 
             return (
-              <article className="pm-board-card" key={item.pmMarketId || item.marketId || index}>
+              <article className="pm-board-card" key={item.pmEventId || item.id || index}>
                 <div className="pm-board-card-top">
                   <div className="pm-board-card-title-wrap">
-                    <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
+                    <h3 className="pm-board-card-title">{getEventTitle(item)}</h3>
                     <div className="pm-board-card-meta">
-                      北京时间 {formatBeijingTime(item.resolvedAt)} · {translateCategoryLabel(item.category || selectedCategory || "-")}
+                      北京时间 {formatBeijingTime(item.endTime || item.updatedAt)} · {translateCategoryLabel(item.category || selectedCategory || "-")}
                     </div>
                   </div>
-                  <div className="pm-board-status win">{formatOutcomeLabel(item.resolvedOutcome) || "已结算"}</div>
+                  <div className="pm-board-status closed">{formatStatusLabel(item.status || "CLOSED")}</div>
                 </div>
                 <div className="pm-board-order-grid">
                   <div className="pm-board-order-cell">
-                    <span>结算结果</span>
-                    <strong>{formatOutcomeLabel(item.resolvedOutcome) || "-"}</strong>
+                    <span>事件ID</span>
+                    <strong>{item.pmEventId || "-"}</strong>
                   </div>
                   <div className="pm-board-order-cell">
-                    <span>结算值</span>
-                    <strong>{item.resolvedValue || "-"}</strong>
+                    <span>分类</span>
+                    <strong>{translateCategoryLabel(item.category || "-")}</strong>
                   </div>
                   <div className="pm-board-order-cell">
-                    <span>市场ID</span>
-                    <strong>{item.pmMarketId || "-"}</strong>
+                    <span>结束时间</span>
+                    <strong>{item.endTime ? formatBeijingTime(item.endTime) : "-"}</strong>
                   </div>
                   <div className="pm-board-order-cell">
-                    <span>来源</span>
-                    <strong>{item.resolutionSource || "-"}</strong>
+                    <span>状态</span>
+                    <strong>{formatStatusLabel(item.status || "CLOSED")}</strong>
                   </div>
                 </div>
               </article>
