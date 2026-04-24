@@ -10,6 +10,7 @@ import {
   closePolymarketPosition,
   fetchPolymarketOrders,
   fetchPolymarketHistoryMarkets,
+  fetchPolymarketResults,
   fetchPolymarketPlayOrders,
   updatePolymarketPlayPin,
 } from "./polymarketApi";
@@ -22,6 +23,37 @@ const TABS = [
   { key: "markets", label: "市场" },
   { key: "orders", label: "当前委托" },
   { key: "results", label: "历史记录" },
+];
+const HISTORY_TYPES = [
+  { key: "markets", label: "历史盘口" },
+  { key: "bills", label: "历史账单" },
+];
+const BILL_FLOW_TYPES = [
+  { key: "", label: "类型 全部" },
+  { key: "CREATE", label: "买入" },
+  { key: "MANUAL_CLOSE", label: "卖出" },
+  { key: "SETTLE", label: "结算" },
+  { key: "SETTLE_REVIEW", label: "审核" },
+];
+const BILL_STATUS_TYPES = [
+  { key: "", label: "状态 全部" },
+  { key: "OPEN", label: "待结算" },
+  { key: "MANUAL_CLOSED", label: "已卖出" },
+  { key: "WIN", label: "已中奖" },
+  { key: "LOSE", label: "未命中" },
+  { key: "SETTLED", label: "已结算" },
+  { key: "PENDING_REVIEW", label: "待审核" },
+];
+const BILL_RESOLVED_TYPES = [
+  { key: "", label: "结算结果 全部" },
+  { key: "YES", label: "是" },
+  { key: "NO", label: "否" },
+];
+const BILL_DATE_PRESETS = [
+  { key: "", label: "全部" },
+  { key: "yesterday", label: "昨日" },
+  { key: "week", label: "近一周" },
+  { key: "month", label: "本月" },
 ];
 const GRAPH_RANGES = [
   { key: "1h", label: "1小时" },
@@ -82,6 +114,16 @@ function formatStatusLabel(status) {
   if (normalized === "LOSE") return "未命中";
   if (normalized === "PENDING") return "处理中";
   return status;
+}
+
+function formatFlowTypeLabel(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) return "账单";
+  if (normalized === "CREATE") return "买入";
+  if (normalized === "MANUAL_CLOSE") return "卖出";
+  if (normalized === "SETTLE") return "结算";
+  if (normalized === "SETTLE_REVIEW") return "审核";
+  return value;
 }
 
 function resolveSettlementDate(order) {
@@ -401,6 +443,41 @@ function formatSellQuote(value) {
   return `${Math.round(num * 100)}¢`;
 }
 
+function formatBillAmount(value, currency = "USDC") {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return `- ${currency}`;
+  return `${num.toFixed(4).replace(/\.?0+$/, "")} ${currency}`;
+}
+
+function formatBillPnl(value, currency = "USDC") {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return `- ${currency}`;
+  return `${num > 0 ? "+" : ""}${num.toFixed(4).replace(/\.?0+$/, "")} ${currency}`;
+}
+
+function getBillDateRange(preset) {
+  const pad = (value) => String(value).padStart(2, "0");
+  const formatDateTime = (date, endOfDay = false) => (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${endOfDay ? "23:59:59" : "00:00:00"}`
+  );
+  const now = new Date();
+  if (preset === "yesterday") {
+    const date = new Date(now);
+    date.setDate(now.getDate() - 1);
+    return { dateFrom: formatDateTime(date, false), dateTo: formatDateTime(date, true) };
+  }
+  if (preset === "week") {
+    const from = new Date(now);
+    from.setDate(now.getDate() - 6);
+    return { dateFrom: formatDateTime(from, false), dateTo: formatDateTime(now, true) };
+  }
+  if (preset === "month") {
+    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { dateFrom: formatDateTime(from, false), dateTo: formatDateTime(now, true) };
+  }
+  return { dateFrom: "", dateTo: "" };
+}
+
 function getRemainingOrderSize(order) {
   const candidates = [order?.remainingSize, order?.filledSize, order?.orderSize];
   for (const candidate of candidates) {
@@ -666,6 +743,12 @@ function PolymarketApp({ baseUrl, balance }) {
   const [resultsLoading, setResultsLoading] = useState(false);
   const [resultsPage, setResultsPage] = useState(1);
   const [resultsHasMore, setResultsHasMore] = useState(false);
+  const [historyType, setHistoryType] = useState("markets");
+  const [billKeyword, setBillKeyword] = useState("");
+  const [billFlowType, setBillFlowType] = useState("");
+  const [billStatus, setBillStatus] = useState("");
+  const [billResolvedOutcome, setBillResolvedOutcome] = useState("");
+  const [billDatePreset, setBillDatePreset] = useState("");
   const [marketPage, setMarketPage] = useState(1);
   const [marketHasMore, setMarketHasMore] = useState(false);
   const [loadingMoreMarkets, setLoadingMoreMarkets] = useState(false);
@@ -1097,6 +1180,9 @@ function PolymarketApp({ baseUrl, balance }) {
   }, [activeTab, data.markets, data.results, orders]);
 
   const filteredCurrentList = useMemo(() => {
+    if (activeTab === "results") {
+      return currentList;
+    }
     const keyword = String(searchQuery || "").trim().toLowerCase();
     if (!keyword) return currentList;
     return currentList.filter((item) => {
@@ -1350,7 +1436,20 @@ function PolymarketApp({ baseUrl, balance }) {
   const loadResults = useCallback(async ({ page = 1, append = false } = {}) => {
     setResultsLoading(true);
     try {
-      const res = await fetchPolymarketHistoryMarkets(baseUrl, page, RESULT_PAGE_SIZE, selectedCategory, searchQuery);
+      const range = getBillDateRange(billDatePreset);
+      const res = historyType === "bills"
+        ? await fetchPolymarketResults(baseUrl, {
+            page,
+            size: RESULT_PAGE_SIZE,
+            category: selectedCategory,
+            keyword: billKeyword,
+            flowType: billFlowType,
+            status: billStatus,
+            resolvedOutcome: billResolvedOutcome,
+            dateFrom: range.dateFrom,
+            dateTo: range.dateTo,
+          })
+        : await fetchPolymarketHistoryMarkets(baseUrl, page, RESULT_PAGE_SIZE, selectedCategory, searchQuery);
       const rows = Array.isArray(res.data) ? res.data : [];
       const total = Number(res?.meta?.total ?? 0);
       setResultsPage(page);
@@ -1364,7 +1463,7 @@ function PolymarketApp({ baseUrl, balance }) {
     } finally {
       setResultsLoading(false);
     }
-  }, [baseUrl, searchQuery, selectedCategory]);
+  }, [baseUrl, billDatePreset, billFlowType, billKeyword, billResolvedOutcome, billStatus, historyType, searchQuery, selectedCategory]);
 
   useEffect(() => {
     if (activeTab === "orders") {
@@ -1491,6 +1590,65 @@ function PolymarketApp({ baseUrl, balance }) {
           </button>
         ))}
       </section>
+
+      {!loading && !error && activeTab === "results" ? (
+        <section className="pm-board-history-filters">
+          <div className="pm-board-tabs" role="tablist" aria-label="历史类型">
+            {HISTORY_TYPES.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className={historyType === item.key ? "pm-board-tab active" : "pm-board-tab"}
+                onClick={() => {
+                  setHistoryType(item.key);
+                  setResultsPage(1);
+                  setResultsHasMore(false);
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {historyType === "bills" ? (
+            <div className="pm-board-history-filter-grid">
+              <input
+                type="text"
+                value={billKeyword}
+                onChange={(e) => setBillKeyword(e.target.value)}
+                className="pm-board-search-input"
+                placeholder="搜索事件"
+              />
+              <select className="pm-board-filter-select" value={billFlowType} onChange={(e) => setBillFlowType(e.target.value)}>
+                {BILL_FLOW_TYPES.map((item) => (
+                  <option key={item.key || "all"} value={item.key}>{item.label}</option>
+                ))}
+              </select>
+              <select className="pm-board-filter-select" value={billStatus} onChange={(e) => setBillStatus(e.target.value)}>
+                {BILL_STATUS_TYPES.map((item) => (
+                  <option key={item.key || "all"} value={item.key}>{item.label}</option>
+                ))}
+              </select>
+              <select className="pm-board-filter-select" value={billResolvedOutcome} onChange={(e) => setBillResolvedOutcome(e.target.value)}>
+                {BILL_RESOLVED_TYPES.map((item) => (
+                  <option key={item.key || "all"} value={item.key}>{item.label}</option>
+                ))}
+              </select>
+              <div className="pm-board-filter-preset-group">
+                {BILL_DATE_PRESETS.map((item) => (
+                  <button
+                    key={item.key || "all"}
+                    type="button"
+                    className={billDatePreset === item.key ? "pm-board-filter-preset active" : "pm-board-filter-preset"}
+                    onClick={() => setBillDatePreset(item.key)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {error ? <div className="pm-empty" style={{ color: "#dc2626" }}>{error}</div> : null}
       {!error && !loading && !selectedCategory ? <div className="pm-empty">当前没有已开启的分类。</div> : null}
@@ -1851,6 +2009,68 @@ function PolymarketApp({ baseUrl, balance }) {
               );
             }
 
+            if (activeTab === "results" && historyType === "bills") {
+              return (
+                <article className="pm-board-card" key={item.orderNo || item.id || index}>
+                  <div className="pm-board-card-top">
+                    <div className="pm-board-card-title-wrap">
+                      <div className="pm-board-card-title-row">
+                        {getMarketImage(item) ? (
+                          <img
+                            src={getMarketImage(item)}
+                            alt=""
+                            className="pm-board-card-avatar"
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : null}
+                        <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
+                      </div>
+                      <div className="pm-board-card-meta">
+                        北京时间 {formatBeijingTime(item.createdAt)} · {translateCategoryLabel(item.category)}
+                      </div>
+                    </div>
+                    <div className="pm-board-status">
+                      {formatFlowTypeLabel(item.flowType)}
+                    </div>
+                  </div>
+                  <div className="pm-board-order-grid">
+                    <div className="pm-board-order-cell">
+                      <span>订单号</span>
+                      <strong>{item.orderNo || "-"}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>玩法</span>
+                      <strong>{formatOutcomeLabel(item.selectionName || item.selectionCode || "-")}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>账单金额</span>
+                      <strong>{formatBillAmount(item.businessAmount, item.currency || "USDC")}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>账单盈亏</span>
+                      <strong>{formatBillPnl(item.pnlAmount, item.currency || "USDC")}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>下单价格</span>
+                      <strong>{item.orderPrice ? formatCentPrice(item.orderPrice) : "-"}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>卖出价格</span>
+                      <strong>{item.sellPrice ? formatSellQuote(item.sellPrice) : "-"}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>状态</span>
+                      <strong>{formatStatusLabel(item.settleStatus || item.afterStatus || item.beforeStatus || "-")}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>结算结果</span>
+                      <strong>{formatOutcomeLabel(item.resolvedOutcome || "-")}</strong>
+                    </div>
+                  </div>
+                </article>
+              );
+            }
             const rows = getOutcomeRows(item);
             const cardMeta = getCardMeta(item);
             return (

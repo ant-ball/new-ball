@@ -110,8 +110,9 @@ export async function syncPolymarketPrice(baseUrl, pmMarketId) {
   return { url, data: unwrapData(json) || json };
 }
 
-export async function fetchPolymarketResults(baseUrl, page = 1, size = 20) {
-  const { url, json } = await requestJson(baseUrl, `/polymarket/results?page=${page}&size=${size}`);
+export async function fetchPolymarketResults(baseUrl, { page = 1, size = 20, category = "", keyword = "", flowType = "", status = "", resolvedOutcome = "", dateFrom = "", dateTo = "" } = {}) {
+  const suffix = `${category ? `&category=${encodeURIComponent(category)}` : ""}${keyword ? `&keyword=${encodeURIComponent(keyword)}` : ""}${flowType ? `&flowType=${encodeURIComponent(flowType)}` : ""}${status ? `&status=${encodeURIComponent(status)}` : ""}${resolvedOutcome ? `&resolvedOutcome=${encodeURIComponent(resolvedOutcome)}` : ""}${dateFrom ? `&dateFrom=${encodeURIComponent(dateFrom)}` : ""}${dateTo ? `&dateTo=${encodeURIComponent(dateTo)}` : ""}`;
+  const { url, json } = await requestJson(baseUrl, `/polymarket/results?page=${page}&size=${size}${suffix}`);
   return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
 }
 
