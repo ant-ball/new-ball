@@ -121,6 +121,12 @@ export async function fetchPolymarketHistoryEvents(baseUrl, page = 1, size = 20,
   return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
 }
 
+export async function fetchPolymarketHistoryMarkets(baseUrl, page = 1, size = 20, category = "", keyword = "") {
+  const suffix = `${category ? `&category=${encodeURIComponent(category)}` : ""}${keyword ? `&keyword=${encodeURIComponent(keyword)}` : ""}`;
+  const { url, json } = await requestJson(baseUrl, `/polymarket/markets/history?page=${page}&size=${size}${suffix}`);
+  return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
+}
+
 export async function syncPolymarketEvents(baseUrl) {
   const { url, json } = await requestJson(baseUrl, "/polymarket/sync/events?offset=0&limit=200", {
     method: "POST",

@@ -9,7 +9,7 @@ import {
   fetchPolymarketMarketTranslation,
   closePolymarketPosition,
   fetchPolymarketOrders,
-  fetchPolymarketHistoryEvents,
+  fetchPolymarketHistoryMarkets,
   fetchPolymarketPlayOrders,
   updatePolymarketPlayPin,
 } from "./polymarketApi";
@@ -1350,7 +1350,7 @@ function PolymarketApp({ baseUrl, balance }) {
   const loadResults = useCallback(async ({ page = 1, append = false } = {}) => {
     setResultsLoading(true);
     try {
-      const res = await fetchPolymarketHistoryEvents(baseUrl, page, RESULT_PAGE_SIZE, selectedCategory);
+      const res = await fetchPolymarketHistoryMarkets(baseUrl, page, RESULT_PAGE_SIZE, selectedCategory, searchQuery);
       const rows = Array.isArray(res.data) ? res.data : [];
       const total = Number(res?.meta?.total ?? 0);
       setResultsPage(page);
@@ -1364,7 +1364,7 @@ function PolymarketApp({ baseUrl, balance }) {
     } finally {
       setResultsLoading(false);
     }
-  }, [baseUrl, selectedCategory]);
+  }, [baseUrl, searchQuery, selectedCategory]);
 
   useEffect(() => {
     if (activeTab === "orders") {
@@ -1851,34 +1851,41 @@ function PolymarketApp({ baseUrl, balance }) {
               );
             }
 
+            const rows = getOutcomeRows(item);
+            const cardMeta = getCardMeta(item);
             return (
-              <article className="pm-board-card" key={item.pmEventId || item.id || index}>
+              <article className="pm-board-card closed" key={item.pmMarketId || item.id || index}>
                 <div className="pm-board-card-top">
                   <div className="pm-board-card-title-wrap">
-                    <h3 className="pm-board-card-title">{getEventTitle(item)}</h3>
+                    <div className="pm-board-card-title-row">
+                      {getMarketImage(item) ? (
+                        <img
+                          src={getMarketImage(item)}
+                          alt=""
+                          className="pm-board-card-avatar"
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : null}
+                      <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
+                    </div>
                     <div className="pm-board-card-meta">
-                      北京时间 {formatBeijingTime(item.endTime || item.updatedAt)} · {translateCategoryLabel(item.category || selectedCategory || "-")}
+                      {cardMeta.volumeLabel ? `交易额 ${cardMeta.volumeLabel}` : "交易额 -"} {cardMeta.dateLabel ? `· ${cardMeta.dateLabel}` : ""} {item?.pmEventId ? `· 事件 ${item.pmEventId}` : ""}
                     </div>
                   </div>
                   <div className="pm-board-status closed">{formatStatusLabel(item.status || "CLOSED")}</div>
                 </div>
-                <div className="pm-board-order-grid">
-                  <div className="pm-board-order-cell">
-                    <span>事件ID</span>
-                    <strong>{item.pmEventId || "-"}</strong>
-                  </div>
-                  <div className="pm-board-order-cell">
-                    <span>分类</span>
-                    <strong>{translateCategoryLabel(item.category || "-")}</strong>
-                  </div>
-                  <div className="pm-board-order-cell">
-                    <span>结束时间</span>
-                    <strong>{item.endTime ? formatBeijingTime(item.endTime) : "-"}</strong>
-                  </div>
-                  <div className="pm-board-order-cell">
-                    <span>状态</span>
-                    <strong>{formatStatusLabel(item.status || "CLOSED")}</strong>
-                  </div>
+                <div className="pm-board-rows">
+                  {rows.slice(0, 4).map((row) => (
+                    <div className="pm-board-row closed" key={row.key}>
+                      <div className="pm-board-row-main">
+                        <div className="pm-board-row-name">{translateDynamicText(row.label)}</div>
+                        <div className="pm-board-row-sub">{formatOutcomeLabel(row.rawLabel)}</div>
+                      </div>
+                      <div className="pm-board-row-price">{formatCentPrice(row.price)}</div>
+                      <div className="pm-board-row-prob">{formatProbability(row.price)}</div>
+                    </div>
+                  ))}
                 </div>
               </article>
             );
