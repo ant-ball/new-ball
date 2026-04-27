@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchPolymarketCategories,
+  fetchPolymarketEvents,
   fetchPolymarketMarkets,
   fetchPolymarketPrices,
   fetchPolymarketGraph,
@@ -23,6 +24,10 @@ const TABS = [
   { key: "markets", label: "市场" },
   { key: "orders", label: "当前委托" },
   { key: "results", label: "历史记录" },
+];
+const MARKET_VIEW_MODES = [
+  { key: "direct", label: "直达市场" },
+  { key: "events", label: "事件视图" },
 ];
 const HISTORY_TYPES = [
   { key: "markets", label: "历史盘口" },
@@ -338,6 +343,17 @@ function getCardMeta(item) {
   return {
     dateLabel,
     volumeLabel: volumeLabel ? `${volumeLabel} Vol.` : "",
+  };
+}
+
+function getEventMeta(item) {
+  const endValue = item?.endDate || item?.endTime || item?.closeTime || item?.closedAt || item?.resolvedAt;
+  const dateLabel = formatShortDate(endValue);
+  const count = Number(item?.priceCount ?? 0);
+  const countLabel = Number.isFinite(count) && count > 0 ? `${count} 市场` : "市场待同步";
+  return {
+    countLabel,
+    dateLabel,
   };
 }
 
@@ -710,8 +726,10 @@ function PolymarketApp({ baseUrl, balance }) {
   const marketLoadMoreRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("markets");
+  const [marketViewMode, setMarketViewMode] = useState("direct");
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedEventId, setSelectedEventId] = useState("");
   const [selectedMarketId, setSelectedMarketId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
@@ -754,6 +772,7 @@ function PolymarketApp({ baseUrl, balance }) {
   const [loadingMoreMarkets, setLoadingMoreMarkets] = useState(false);
   const [data, setData] = useState({
     categories: [],
+    events: [],
     markets: [],
     prices: [],
     results: [],
@@ -804,6 +823,20 @@ function PolymarketApp({ baseUrl, balance }) {
     });
   }, []);
 
+  const hydrateEvents = useCallback((eventRows) => {
+    const nextEvents = Array.isArray(eventRows) ? eventRows : [];
+    setData((prev) => ({
+      ...prev,
+      events: nextEvents,
+    }));
+    setSelectedEventId((prev) => {
+      if (prev && nextEvents.some((item) => item?.pmEventId === prev)) {
+        return prev;
+      }
+      return nextEvents.find((item) => item?.pmEventId)?.pmEventId || "";
+    });
+  }, []);
+
   const loadCategoryMarkets = useCallback(async ({ category = "", page = 1, append = false } = {}) => {
     if (!category) {
       setSelectedCategory("");
@@ -812,6 +845,7 @@ function PolymarketApp({ baseUrl, balance }) {
       setMarketHasMore(false);
       setData((prev) => ({
         ...prev,
+        events: [],
         markets: [],
         prices: [],
       }));
@@ -852,6 +886,110 @@ function PolymarketApp({ baseUrl, balance }) {
       }
     }
   }, [baseUrl, categories, hydrateMarkets, loadCategories]);
+
+  const loadEventMarkets = useCallback(async ({ pmEventId = "", page = 1, append = false } = {}) => {
+    if (!pmEventId) {
+      setSelectedEventId("");
+      setSelectedMarketId("");
+      setMarketPage(1);
+      setMarketHasMore(false);
+      setData((prev) => ({
+        ...prev,
+        markets: [],
+        prices: [],
+      }));
+      return;
+    }
+    if (append) {
+      setLoadingMoreMarkets(true);
+    } else {
+      setLoading(true);
+    }
+    setError("");
+    try {
+      const marketsRes = await fetchPolymarketMarkets(baseUrl, { pmEventId, page, size: PAGE_SIZE });
+      const markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
+      const total = Number(marketsRes?.meta?.total ?? 0);
+      setSelectedEventId(pmEventId);
+      setMarketPage(page);
+      setMarketHasMore(page * PAGE_SIZE < total);
+      hydrateMarkets(markets, append);
+    } catch (err) {
+      setError(err?.message || "Polymarket 事件市场加载失败");
+    } finally {
+      if (append) {
+        setLoadingMoreMarkets(false);
+      } else {
+        setLoading(false);
+      }
+    }
+  }, [baseUrl, hydrateMarkets]);
+
+  const loadCategoryEvents = useCallback(async ({ category = "" } = {}) => {
+    if (!category) {
+      setSelectedCategory("");
+      setSelectedEventId("");
+      setSelectedMarketId("");
+      setMarketPage(1);
+      setMarketHasMore(false);
+      setData((prev) => ({
+        ...prev,
+        events: [],
+        markets: [],
+        prices: [],
+      }));
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const categoryRows = categories.length > 0 ? categories : await loadCategories();
+      const resolvedCategory = category || pickInitialCategory(categoryRows, "");
+      const eventsRes = resolvedCategory
+        ? await fetchPolymarketEvents(baseUrl, resolvedCategory, 1, PAGE_SIZE)
+        : { data: [] };
+      const events = Array.isArray(eventsRes.data) ? eventsRes.data : [];
+      const nextEventId = (
+        events.find((item) => item?.pmEventId === selectedEventId)?.pmEventId
+        || events.find((item) => item?.pmEventId)?.pmEventId
+        || ""
+      );
+
+      setSelectedCategory(resolvedCategory);
+      hydrateEvents(events);
+      setData((prev) => ({
+        ...prev,
+        categories: categoryRows,
+      }));
+      if (categories.length === 0) {
+        setCategories(categoryRows);
+      }
+
+      if (!nextEventId) {
+        setSelectedMarketId("");
+        setMarketPage(1);
+        setMarketHasMore(false);
+        setData((prev) => ({
+          ...prev,
+          markets: [],
+          prices: [],
+        }));
+        return;
+      }
+
+      const marketsRes = await fetchPolymarketMarkets(baseUrl, { pmEventId: nextEventId, page: 1, size: PAGE_SIZE });
+      const markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
+      const total = Number(marketsRes?.meta?.total ?? 0);
+      setSelectedEventId(nextEventId);
+      setMarketPage(1);
+      setMarketHasMore(PAGE_SIZE < total);
+      hydrateMarkets(markets, false);
+    } catch (err) {
+      setError(err?.message || "Polymarket 事件加载失败");
+    } finally {
+      setLoading(false);
+    }
+  }, [baseUrl, categories, hydrateEvents, hydrateMarkets, loadCategories, selectedEventId]);
 
   const applySocketPatch = useCallback((message) => {
     if (!message || typeof message !== "object") {
@@ -936,6 +1074,7 @@ function PolymarketApp({ baseUrl, balance }) {
         setSelectedCategory(initialCategory);
         setData({
           categories: categoryRows,
+          events: [],
           markets: [],
           prices: [],
           results: [],
@@ -967,8 +1106,12 @@ function PolymarketApp({ baseUrl, balance }) {
     if (!selectedCategory) {
       return;
     }
+    if (marketViewMode === "events") {
+      loadCategoryEvents({ category: selectedCategory });
+      return;
+    }
     loadCategoryMarkets({ category: selectedCategory, page: 1, append: false });
-  }, [loadCategoryMarkets, selectedCategory]);
+  }, [loadCategoryEvents, loadCategoryMarkets, marketViewMode, selectedCategory]);
 
   const { connected: wsConnected, syncMarketSubscriptions } = usePolymarketSocket({
     baseUrl,
@@ -1167,9 +1310,10 @@ function PolymarketApp({ baseUrl, balance }) {
   const summary = useMemo(() => ([
     { label: "分类", value: categories.length },
     { label: "分页", value: marketPage },
+    { label: "事件", value: data.events.length },
     { label: "市场", value: data.markets.length },
     { label: "可下单选项", value: data.markets.reduce((count, item) => count + getOutcomeRows(item).length, 0) },
-  ]), [categories.length, data.markets, marketPage]);
+  ]), [categories.length, data.events.length, data.markets, marketPage]);
 
   const currentList = useMemo(() => {
     if (activeTab === "markets") return data.markets;
@@ -1226,11 +1370,13 @@ function PolymarketApp({ baseUrl, balance }) {
       return;
     }
     setSelectedCategory(category);
+    setSelectedEventId("");
     setSelectedMarketId("");
     setMarketPage(1);
     setMarketHasMore(false);
     setData((prev) => ({
       ...prev,
+      events: [],
       markets: [],
       prices: [],
     }));
@@ -1242,6 +1388,14 @@ function PolymarketApp({ baseUrl, balance }) {
     }
     setSelectedMarketId(marketId);
   }, [selectedMarketId]);
+
+  const handleEventClick = useCallback((eventId) => {
+    if (!eventId || eventId === selectedEventId) {
+      return;
+    }
+    setSelectedMarketId("");
+    loadEventMarkets({ pmEventId: eventId, page: 1, append: false });
+  }, [loadEventMarkets, selectedEventId]);
 
   const handleTogglePlayPin = useCallback(async () => {
     if (!selectedMarketId || pinSubmitting) {
@@ -1479,7 +1633,11 @@ function PolymarketApp({ baseUrl, balance }) {
 
   const handleLoadMore = useCallback(() => {
     if (activeTab === "markets" && !loadingMoreMarkets && marketHasMore) {
-      loadCategoryMarkets({ category: selectedCategory, page: marketPage + 1, append: true });
+      if (marketViewMode === "events") {
+        loadEventMarkets({ pmEventId: selectedEventId, page: marketPage + 1, append: true });
+      } else {
+        loadCategoryMarkets({ category: selectedCategory, page: marketPage + 1, append: true });
+      }
       return;
     }
     if (activeTab === "orders" && !ordersLoading && ordersHasMore) {
@@ -1492,9 +1650,11 @@ function PolymarketApp({ baseUrl, balance }) {
   }, [
     activeTab,
     loadCategoryMarkets,
+    loadEventMarkets,
     loadOrders,
     loadResults,
     loadingMoreMarkets,
+    marketViewMode,
     marketHasMore,
     marketPage,
     ordersHasMore,
@@ -1503,6 +1663,7 @@ function PolymarketApp({ baseUrl, balance }) {
     resultsHasMore,
     resultsLoading,
     resultsPage,
+    selectedEventId,
     selectedCategory,
   ]);
 
@@ -1520,6 +1681,10 @@ function PolymarketApp({ baseUrl, balance }) {
         if (!entry?.isIntersecting) {
           return;
         }
+        if (marketViewMode === "events") {
+          loadEventMarkets({ pmEventId: selectedEventId, page: marketPage + 1, append: true });
+          return;
+        }
         loadCategoryMarkets({ category: selectedCategory, page: marketPage + 1, append: true });
       },
       {
@@ -1530,7 +1695,15 @@ function PolymarketApp({ baseUrl, balance }) {
     );
     observer.observe(target);
     return () => observer.disconnect();
-  }, [activeTab, loadCategoryMarkets, loading, loadingMoreMarkets, marketHasMore, marketPage, selectedCategory]);
+  }, [activeTab, loadCategoryMarkets, loadEventMarkets, loading, loadingMoreMarkets, marketHasMore, marketPage, marketViewMode, selectedCategory, selectedEventId]);
+
+  const handleRefreshMarkets = useCallback(() => {
+    if (marketViewMode === "events") {
+      loadCategoryEvents({ category: selectedCategory });
+      return;
+    }
+    loadCategoryMarkets({ category: selectedCategory, page: 1, append: false });
+  }, [loadCategoryEvents, loadCategoryMarkets, marketViewMode, selectedCategory]);
 
   return (
     <div className="polymarket-shell pm-board-shell">
@@ -1538,12 +1711,14 @@ function PolymarketApp({ baseUrl, balance }) {
         <div>
           <h2 className="pm-board-title">所有盘口</h2>
           <div className="pm-board-subtitle">
-            {selectedCategory ? `${translateCategoryLabel(selectedCategory)} · 直接按市场展示` : "选择分类后查看盘口"}
+            {selectedCategory
+              ? `${translateCategoryLabel(selectedCategory)} · ${marketViewMode === "events" ? "先看事件，再进入市场" : "直接按市场展示"}`
+              : "选择分类后查看盘口"}
           </div>
         </div>
         <div className="pm-board-tools">
           <div className="pm-board-balance">可用余额 {availableBalance.toFixed(2)} USDT</div>
-          <button type="button" className="pm-board-icon" onClick={() => loadCategoryMarkets({ category: selectedCategory, page: 1, append: false })} disabled={loading || loadingMoreMarkets}>
+          <button type="button" className="pm-board-icon" onClick={handleRefreshMarkets} disabled={loading || loadingMoreMarkets}>
             {loading || loadingMoreMarkets ? "刷新中" : "刷新"}
           </button>
         </div>
@@ -1565,13 +1740,26 @@ function PolymarketApp({ baseUrl, balance }) {
         })}
       </section>
 
+      <section className="pm-board-tabs" role="tablist" aria-label="市场浏览方式">
+        {MARKET_VIEW_MODES.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={marketViewMode === item.key ? "pm-board-tab active" : "pm-board-tab"}
+            onClick={() => setMarketViewMode(item.key)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </section>
+
       <section className="pm-board-search">
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pm-board-search-input"
-          placeholder="搜索问题或选项"
+          placeholder="搜索市场问题或选项"
         />
         <div className="pm-board-search-meta">
           最新价格：{formatLiveUpdateLabel(lastPriceRefreshAt, liveNowMs)} · {socketConnected ? "WS 已连接" : "WS 未连接"}
@@ -1652,14 +1840,39 @@ function PolymarketApp({ baseUrl, balance }) {
 
       {error ? <div className="pm-empty" style={{ color: "#dc2626" }}>{error}</div> : null}
       {!error && !loading && !selectedCategory ? <div className="pm-empty">当前没有已开启的分类。</div> : null}
-      {!error && !loading && selectedCategory && data.markets.length === 0 && activeTab === "markets" ? (
-        <div className="pm-empty">当前分类下还没有可展示的市场数据。</div>
+      {!error && !loading && selectedCategory && marketViewMode === "events" && data.events.length === 0 && activeTab === "markets" ? (
+        <div className="pm-empty">当前分类下还没有可展示的事件数据。</div>
+      ) : null}
+      {!error && !loading && selectedCategory && data.markets.length === 0 && activeTab === "markets" && (marketViewMode === "direct" || data.events.length > 0) ? (
+        <div className="pm-empty">{marketViewMode === "events" ? "当前事件下还没有可展示的市场数据。" : "当前分类下还没有可展示的市场数据。"}</div>
       ) : null}
       {loading ? <div className="pm-empty">正在加载数据...</div> : null}
 
       {!loading && !error && activeTab === "markets" ? (
         <section className="pm-board-market-layout">
           <div className="pm-board-market-main">
+            {marketViewMode === "events" && data.events.length > 0 ? (
+              <section className="pm-board-events">
+                {data.events.map((item, index) => {
+                  const pmEventId = item?.pmEventId || item?.id || `event-${index}`;
+                  const meta = getEventMeta(item);
+                  return (
+                    <button
+                      key={pmEventId}
+                      type="button"
+                      className={selectedEventId === item?.pmEventId ? "pm-board-event active" : "pm-board-event"}
+                      onClick={() => handleEventClick(item?.pmEventId)}
+                    >
+                      <div className="pm-board-event-title">{getEventTitle(item)}</div>
+                      <div className="pm-board-event-meta">
+                        {meta.countLabel}{meta.dateLabel ? ` · ${meta.dateLabel}` : ""}{item?.pmEventId ? ` · ${item.pmEventId}` : ""}
+                      </div>
+                      <div className="pm-board-event-status">{formatStatusLabel(item?.status || "ACTIVE")}</div>
+                    </button>
+                  );
+                })}
+              </section>
+            ) : null}
             {filteredCurrentList.length > 0 ? (
               <section className="pm-board-grid">
                 {filteredCurrentList.map((item, index) => {
