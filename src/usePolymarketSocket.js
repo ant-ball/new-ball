@@ -6,7 +6,7 @@ const POLYMARKET_WS_PATH = "/ws/polymarket";
 function resolveWsUrl(baseUrl) {
   const fallback = typeof window !== "undefined" && window.location && window.location.origin
     ? window.location.origin
-    : (baseUrl || "https://ball.skybit.shop");
+    : (baseUrl || "https://ball-stack.skybit.shop");
   const source = (baseUrl || fallback).replace(/\/$/, "");
   try {
     const parsed = new URL(source);
@@ -14,7 +14,7 @@ function resolveWsUrl(baseUrl) {
     return `${scheme}//${parsed.host}${POLYMARKET_WS_PATH}`;
   } catch {
     const match = String(source).match(/^https?:\/\/([^/]+)/i);
-    const host = match ? match[1] : "ball.skybit.shop";
+    const host = match ? match[1] : "ball-stack.skybit.shop";
     const scheme = String(source).startsWith("https:") ? "wss:" : "ws:";
     return `${scheme}//${host}${POLYMARKET_WS_PATH}`;
   }

@@ -15,6 +15,7 @@ import {
     getMatchResult,
 } from "./api";
 import { useOddsSocket } from "./useOddsSocket";
+import { getBallApiBaseUrl } from "./config";
 
 function getMatchListFromOddsResponse(raw, matchType) {
     // 尽量兼容不同返回结构
@@ -1173,7 +1174,7 @@ function RollingMarketCell({ mavo, match, onAddSlip, highlight }) {
 }
 
 export default function SoccerEarlyMarketPage() {
-    const [baseUrl, setBaseUrl] = useState("https://ball.skybit.shop");
+    const [baseUrl, setBaseUrl] = useState(getBallApiBaseUrl);
     const [authReady, setAuthReady] = useState(false);
     const [sportId, setSportId] = useState(1);
     const [type, setType] = useState("0");

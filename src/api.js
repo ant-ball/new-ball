@@ -1,6 +1,7 @@
 import { getStoredBallToken } from "./auth";
+import { getBallApiBaseUrl } from "./config";
 
-const DEFAULT_BASE_URL = "https://ball.skybit.shop";
+const DEFAULT_BASE_URL = getBallApiBaseUrl();
 
 function normalizeDayParam(day) {
     if (day == null || day === "") return undefined;

@@ -23,6 +23,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "proxy": "https://ball-stack.skybit.shop",
   "browserslist": {
     "production": [
       ">0.2%",

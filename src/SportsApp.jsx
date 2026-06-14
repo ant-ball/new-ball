@@ -7,6 +7,7 @@ import MatchCard from './components/MatchCard';
 import SlipDrawer from './components/SlipDrawer';
 import TransferDrawer from './components/TransferDrawer';
 import { fetchUserBalance, fetchUserInfo, getExternalTokenFromUrl, getStoredBallToken, tokenLogin } from './auth';
+import { getBallApiBaseUrl } from './config';
 import {
   formatInplaySelectionLabel,
   formatPreSelectionLabel,
@@ -48,7 +49,7 @@ import {
 } from './transfer';
 import { useOddsSocket } from './useOddsSocket';
 
-const BASE_URL = 'https://ball.skybit.shop';
+const BASE_URL = getBallApiBaseUrl();
 
 const TOP_TABS = ['滚球', '今日', '早盘', '冠军', '综合过关'];
 const SPORT_TABS = [
