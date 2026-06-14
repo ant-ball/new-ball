@@ -4,7 +4,7 @@ export function getBallApiBaseUrl() {
   const configuredBaseUrl = process.env.REACT_APP_BALL_API_BASE_URL;
   if (configuredBaseUrl) return configuredBaseUrl.replace(/\/$/, "");
 
-  if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+  if (typeof window !== "undefined") {
     return window.location.origin;
   }
 
