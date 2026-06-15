@@ -527,6 +527,25 @@ function getInplaySelectionLabel(pa) {
     return selection != null ? String(selection).trim() : "";
 }
 
+function parseCorrectScoreLabel(value) {
+    const normalized = String(value ?? "").trim();
+    const matched = normalized.match(/^(\d+)\s*[-:]\s*(\d+)$/);
+    if (!matched) return null;
+    return { home: matched[1], away: matched[2] };
+}
+
+function resolveCorrectScoreDirection(value, homeName, awayName) {
+    const normalized = normalizeResultCode(value, homeName, awayName);
+    return normalized === "1" || normalized === "2" || normalized === "X" ? normalized : "";
+}
+
+function formatCorrectScoreDisplay(value, direction) {
+    const score = parseCorrectScoreLabel(value);
+    if (!score) return String(value ?? "").trim() || "-";
+    if (direction === "2") return `${score.away}-${score.home}`;
+    return `${score.home}-${score.away}`;
+}
+
 function normalizeNameToken(value) {
     return String(value ?? "")
         .toLowerCase()
@@ -590,7 +609,7 @@ function normalizeHalfFullTimeCode(value, homeName, awayName) {
     return "";
 }
 
-function buildCanonicalTeamType({ betPlayId, rawSelection, homeName, awayName, optionOrder }) {
+function buildCanonicalTeamType({ betPlayId, rawSelection, homeName, awayName, optionOrder, correctScoreDirection }) {
     const marketId = String(betPlayId ?? "").trim();
     const selection = String(rawSelection ?? "").trim();
     const order = optionOrder != null ? String(optionOrder).trim() : "";
@@ -611,7 +630,7 @@ function buildCanonicalTeamType({ betPlayId, rawSelection, homeName, awayName, o
         return selection ? normalizeOverUnderCode(selection) : "";
     }
     if (!selection) return "";
-    if (marketId === "43" || marketId === "10001") return selection;
+    if (marketId === "43" || marketId === "10001") return formatCorrectScoreDisplay(selection, correctScoreDirection);
     if (marketId === "42") return normalizeHalfFullTimeCode(selection, homeName, awayName);
     if (marketId === "10257") return normalizeDoubleChanceCode(selection);
     return selection;
@@ -839,6 +858,10 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
         }
         const atTime = oddsObj?.updateAt ?? oddsObj?.at_time ?? currentItem?.updateAt ?? currentItem?.at_time ?? slipItem.at_time ?? null;
         const nextOdds = parseFloat(currentItem?.odds);
+        const correctScoreDirection = resolveCorrectScoreDirection(currentItem?.team ?? currentItem?.header, getHomeName(currentMatch), getAwayName(currentMatch));
+        const displaySelection = (marketKey === "43_correct_score" || marketKey === "10540_half_time_correct_score")
+            ? formatCorrectScoreDisplay(currentItem?.name, correctScoreDirection)
+            : (currentItem?.name != null ? currentItem.name : currentItem?.handicap);
         return {
             ...slipItem,
             match: currentMatch,
@@ -852,10 +875,11 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
                 homeName: getHomeName(currentMatch),
                 awayName: getAwayName(currentMatch),
                 optionOrder: currentItem?.or ?? currentItem?.OR,
+                correctScoreDirection,
             }) || (slipItem.teamType ?? ""),
             at_time: atTime,
             timeStr: atTime != null ? String(atTime) : "",
-            selectionText: `${getDisplayHomeName(currentMatch)} vs ${getDisplayAwayName(currentMatch)} ${slipItem.label} ${currentItem?.name != null ? currentItem.name : currentItem?.handicap} @${currentItem?.odds}`,
+            selectionText: `${getDisplayHomeName(currentMatch)} vs ${getDisplayAwayName(currentMatch)} ${slipItem.label} ${displaySelection} @${currentItem?.odds}`,
         };
     }
 
@@ -870,6 +894,10 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
     const odDecimal = inplayOddsToDecimal(odRaw);
     const selectionLabel = getInplaySelectionLabel(currentPa);
     const selectionLabelText = selectionLabel ? ` ${selectionLabel}` : "";
+    const correctScoreDirection = resolveCorrectScoreDirection(currentPa?.pNa ?? currentPa?.n2 ?? currentPa?.N2 ?? currentPa?.ha ?? currentPa?.HA, getHomeName(currentMatch), getAwayName(currentMatch));
+    const displaySelection = String(slipItem?.paId ?? currentMavo?.id ?? currentMavo?.ID ?? "") === "10001"
+        ? formatCorrectScoreDisplay(currentPa?.na ?? currentPa?.NA, correctScoreDirection)
+        : null;
     return {
         ...slipItem,
         match: currentMatch,
@@ -883,10 +911,11 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
             homeName: getHomeName(currentMatch),
             awayName: getAwayName(currentMatch),
             optionOrder: currentPa?.or ?? currentPa?.OR,
+            correctScoreDirection,
         }) || (slipItem.teamType ?? ""),
         at_time: atTime,
         timeStr: atTime != null ? String(atTime) : "",
-        selectionText: `${getDisplayHomeName(currentMatch)} vs ${getDisplayAwayName(currentMatch)} ${currentMavo?.na ?? currentMavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
+        selectionText: `${getDisplayHomeName(currentMatch)} vs ${getDisplayAwayName(currentMatch)} ${currentMavo?.na ?? currentMavo?.NA ?? ""}${displaySelection ? ` ${displaySelection}` : selectionLabelText} @${odRaw}`,
     };
 }
 
@@ -963,6 +992,80 @@ function getRawWsClockDisplay(match) {
     if (rawTS !== "") parts.push(`TS:${rawTS}`);
     if (rawQ !== "") parts.push(`Q:${rawQ}`);
     return parts.length > 0 ? parts.join(" ") : null;
+}
+
+function formatTimeDebugValue(value) {
+    if (value == null || value === "") return "-";
+    if (typeof value === "object") {
+        try {
+            return JSON.stringify(value);
+        } catch {
+            return String(value);
+        }
+    }
+    return String(value);
+}
+
+function buildTimeDebugGroups(match) {
+    const latestMavo = getLatestRollingMavo(match);
+
+    return [
+        {
+            key: "match",
+            title: "赛事对象 match",
+            source: "REST 首屏赛事数据；也可能被后续合并后的字段覆盖",
+            rows: [
+                ["timeStatus", match?.timeStatus],
+                ["CP/cp", match?.CP ?? match?.cp],
+                ["TT/tt", match?.TT ?? match?.tt],
+                ["TM/tm", match?.TM ?? match?.tm],
+                ["TS/ts", match?.TS ?? match?.ts],
+                ["TU/tu", match?.TU ?? match?.tu],
+                ["Q/q", match?.Q ?? match?.q],
+                ["time", match?.time],
+                ["matchTime", match?.matchTime],
+                ["startTime", match?.startTime],
+                ["eventTime", match?.eventTime],
+                ["ballScore", match?.ballScore],
+            ],
+        },
+        {
+            key: "mavo",
+            title: "最新赔率 MAVO",
+            source: "treeResults 中 updateAt 最新的一条赔率玩法推送",
+            rows: [
+                ["mavo.id", latestMavo?.id ?? latestMavo?.ID],
+                ["mavo.name", latestMavo?.na ?? latestMavo?.NA],
+                ["mavo.updateAt", latestMavo?.updateAt ?? latestMavo?.UpdateAt],
+                ["mavo.CP/cp", latestMavo?.CP ?? latestMavo?.cp],
+                ["mavo.TT/tt", latestMavo?.TT ?? latestMavo?.tt],
+                ["mavo.TM/tm", latestMavo?.TM ?? latestMavo?.tm],
+                ["mavo.TS/ts", latestMavo?.TS ?? latestMavo?.ts],
+                ["mavo.TU/tu", latestMavo?.TU ?? latestMavo?.tu],
+                ["mavo.Q/q", latestMavo?.Q ?? latestMavo?.q],
+                ["mavo.SS/ss", latestMavo?.SS ?? latestMavo?.ss],
+            ],
+        },
+        {
+            key: "derived",
+            title: "前端派生字段",
+            source: "前端根据 REST / WS 归一化后写入 match 的实时字段",
+            rows: [
+                ["rawWsClockDisplay", getRawWsClockDisplay(match)],
+                ["liveClockMinute", match?.liveClockMinute],
+                ["liveClockSecond", match?.liveClockSecond],
+                ["liveClockUpdatedAt", match?.liveClockUpdatedAt],
+                ["liveHalf", match?.liveHalf],
+                ["liveClockOnBreak", match?.liveClockOnBreak],
+                ["liveClockIsPeriodTime", match?.liveClockIsPeriodTime],
+                ["liveClockSource", match?.liveClockSource],
+                ["liveClockKey", match?.liveClockKey],
+                ["liveClockDisplay", getLiveClockDisplay(match, Date.now(), Number(match?.sportId ?? match?.sport_id) || null)],
+                ["matchTimeDisplay", getMatchTime(match)],
+                ["scoreDisplay", getScore(match)],
+            ],
+        },
+    ];
 }
 
 /** 滚球赔率 分数转小数 (如 "4/5" -> 1.8，即 4/5+1) */
@@ -1077,12 +1180,18 @@ function MarketOddsCell({ marketKey, label, oddsObj, match, onAddSlip }) {
     const betPlayId = bid || "";
     const betPlayName = rest.length ? rest.join("_") : marketKey || "";
     const bigTypeName = bid || "";
+    const isCorrectScore = betPlayId === "43" || betPlayId === "10540";
 
     return (
         <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>{label || oddsObj.name}</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {list.map((item, i) => (
+                    (() => {
+                        const displaySelection = isCorrectScore
+                            ? formatCorrectScoreDisplay(item?.name, resolveCorrectScoreDirection(item?.team ?? item?.header, getHomeName(match), getAwayName(match)))
+                            : (item?.name != null ? item.name : item?.handicap);
+                        return (
                     <span
                         key={item.id || i}
                         role="button"
@@ -1098,10 +1207,11 @@ function MarketOddsCell({ marketKey, label, oddsObj, match, onAddSlip }) {
                             cursor: onAddSlip ? "pointer" : "default",
                         }}
                     >
-                        {item.header ? `${item.header} ` : ""}
-                        {item.name != null ? item.name : item.handicap}
+                        {displaySelection}
                         <span style={{ marginLeft: 6, fontWeight: 600 }}>{item.odds}</span>
                     </span>
+                        );
+                    })()
                 ))}
             </div>
         </div>
@@ -1124,6 +1234,7 @@ function RollingMarketCell({ mavo, match, onAddSlip, highlight }) {
     const options = allOptions;
     if (options.length === 0) return null;
     const title = mavo.na || mavo.NA || mavo.id || mavo.ID || "";
+    const isCorrectScore = ["10001", "10561", "50275", "50590", "50591"].includes(String(mavo?.id ?? mavo?.ID ?? ""));
 
     const isThisMarketHighlighted =
         highlight &&
@@ -1143,6 +1254,9 @@ function RollingMarketCell({ mavo, match, onAddSlip, highlight }) {
                     const odDecimal = inplayOddsToDecimal(odRaw);
                     const canAdd = onAddSlip && paId && odDecimal != null && !isSuspended;
                     const displayOdds = isSuspended ? "-" : odRaw;
+                    const displaySelection = isCorrectScore
+                        ? formatCorrectScoreDisplay(pa?.na ?? pa?.NA, resolveCorrectScoreDirection(pa?.pNa ?? pa?.n2 ?? pa?.N2 ?? pa?.ha ?? pa?.HA, getHomeName(match), getAwayName(match)))
+                        : ((pa.na != null && pa.na !== "") ? pa.na : (pa.pNa != null ? pa.pNa : (pa.NA != null ? pa.NA : "-")));
                     return (
                         <span
                             key={paId || i}
@@ -1160,8 +1274,8 @@ function RollingMarketCell({ mavo, match, onAddSlip, highlight }) {
                                 cursor: canAdd ? "pointer" : "default",
                             }}
                         >
-                            {(pa.na != null && pa.na !== "") ? pa.na : (pa.pNa != null ? pa.pNa : (pa.NA != null ? pa.NA : "-"))}
-                            {(pa.ha != null && String(pa.ha).trim() !== "") || (pa.HA != null && String(pa.HA).trim() !== "") ? (
+                            {displaySelection}
+                            {!isCorrectScore && ((pa.ha != null && String(pa.ha).trim() !== "") || (pa.HA != null && String(pa.HA).trim() !== "")) ? (
                                 <span style={{ color: "#6b7280", marginLeft: 4 }}>({pa.ha ?? pa.HA})</span>
                             ) : null}
                             <span style={{ marginLeft: 6, fontWeight: 600 }}>{displayOdds}</span>
@@ -1192,6 +1306,7 @@ export default function SoccerEarlyMarketPage() {
     const selectedLeagueRef = useRef(selectedLeague);
     selectedLeagueRef.current = selectedLeague;
     const [highlight, setHighlight] = useState(null);
+    const [timeDebugMatchKey, setTimeDebugMatchKey] = useState("");
     const highlightTimerRef = useRef(null);
     const mergeTimerRef = useRef(null);
 
@@ -1640,6 +1755,10 @@ export default function SoccerEarlyMarketPage() {
             const bigTypeName = assoc?.betName ?? "";
             const betPlayName = assoc?.samllName ?? _bpName ?? (marketKey ? marketKey.split("_").slice(1).join("_") : "");
             const betPlayId = assoc != null ? String(assoc.smallId) : playSmallId;
+            const correctScoreDirection = resolveCorrectScoreDirection(item?.team ?? item?.header, getHomeName(match), getAwayName(match));
+            const displaySelection = (marketKey === "43_correct_score" || marketKey === "10540_half_time_correct_score")
+                ? formatCorrectScoreDisplay(item?.name, correctScoreDirection)
+                : (item?.name != null ? item.name : item?.handicap);
             setBetSlip((prev) => {
                 const nextItem = {
                     key: `pre_${match.id}_${item.id}_${slipKeyRef.current++}`,
@@ -1664,8 +1783,9 @@ export default function SoccerEarlyMarketPage() {
                         rawSelection: item.team ?? item.header ?? item.name ?? item.handicap ?? "",
                         homeName: getHomeName(match),
                         awayName: getAwayName(match),
+                        correctScoreDirection,
                     }),
-                    selectionText: `${getDisplayHomeName(match)} vs ${getDisplayAwayName(match)} ${label} ${item.name != null ? item.name : item.handicap} @${item.odds}`,
+                    selectionText: `${getDisplayHomeName(match)} vs ${getDisplayAwayName(match)} ${label} ${displaySelection} @${item.odds}`,
                 };
                 const next = [...prev, nextItem];
                 if (hasDuplicateEventIdInSlip(next)) {
@@ -1697,6 +1817,10 @@ export default function SoccerEarlyMarketPage() {
             const odRaw = pa?.od ?? pa?.OD ?? "";
             const selectionLabel = getInplaySelectionLabel(pa);
             const selectionLabelText = selectionLabel ? ` ${selectionLabel}` : "";
+            const correctScoreDirection = resolveCorrectScoreDirection(pa?.pNa ?? pa?.n2 ?? pa?.N2 ?? pa?.ha ?? pa?.HA, getHomeName(match), getAwayName(match));
+            const displaySelection = String(mavoIdVal ?? "") === "10001"
+                ? formatCorrectScoreDisplay(pa?.na ?? pa?.NA, correctScoreDirection)
+                : null;
             setBetSlip((prev) => {
                 const nextItem = {
                     key: `in_${eventIdStr}_${mavoIdVal}_${paIdVal}_${slipKeyRef.current++}`,
@@ -1722,8 +1846,9 @@ export default function SoccerEarlyMarketPage() {
                         homeName: getHomeName(match),
                         awayName: getAwayName(match),
                         optionOrder: pa?.or ?? pa?.OR,
+                        correctScoreDirection,
                     }),
-                    selectionText: `${getDisplayHomeName(match)} vs ${getDisplayAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${selectionLabelText} @${odRaw}`,
+                    selectionText: `${getDisplayHomeName(match)} vs ${getDisplayAwayName(match)} ${mavo?.na ?? mavo?.NA ?? ""}${displaySelection ? ` ${displaySelection}` : selectionLabelText} @${odRaw}`,
                 };
                 const next = [...prev, nextItem];
                 if (hasDuplicateEventIdInSlip(next)) {
@@ -1768,6 +1893,9 @@ export default function SoccerEarlyMarketPage() {
     };
 
     const slipToBetOrder = (item) => {
+        const correctScoreDirection = item.type === "inplay"
+            ? resolveCorrectScoreDirection(item?.pa?.pNa ?? item?.pa?.n2 ?? item?.pa?.N2 ?? item?.pa?.ha ?? item?.pa?.HA, getHomeName(item?.match), getAwayName(item?.match))
+            : resolveCorrectScoreDirection(item?.item?.team ?? item?.item?.header, getHomeName(item?.match), getAwayName(item?.match));
         const canonicalTeamType = item.type === "inplay"
             ? buildCanonicalTeamType({
                 betPlayId: item.betPlayId,
@@ -1775,6 +1903,7 @@ export default function SoccerEarlyMarketPage() {
                 homeName: getHomeName(item?.match),
                 awayName: getAwayName(item?.match),
                 optionOrder: item?.pa?.or ?? item?.pa?.OR,
+                correctScoreDirection,
             })
             : buildCanonicalTeamType({
                 betPlayId: item.betPlayId,
@@ -1782,6 +1911,7 @@ export default function SoccerEarlyMarketPage() {
                 homeName: getHomeName(item?.match),
                 awayName: getAwayName(item?.match),
                 optionOrder: item?.item?.or ?? item?.item?.OR,
+                correctScoreDirection,
             });
         const base = {
             eventId: item.eventId,
@@ -2575,9 +2705,13 @@ export default function SoccerEarlyMarketPage() {
                                         比赛列表加载中...
                                     </div>
                                 ) : matchList.length > 0 ? (
-                                    matchList.map((match, index) => (
+                                    matchList.map((match, index) => {
+                                        const matchCardKey = getMatchKey(match, index);
+                                        const isTimeDebugOpen = timeDebugMatchKey === matchCardKey;
+                                        const timeDebugGroups = isTimeDebugOpen ? buildTimeDebugGroups(match) : [];
+                                        return (
                                         <div
-                                            key={getMatchKey(match, index)}
+                                            key={matchCardKey}
                                             style={{
                                                 border: "1px solid #e5e7eb",
                                                 borderRadius: 10,
@@ -2616,6 +2750,22 @@ export default function SoccerEarlyMarketPage() {
                                                     )}
                                                 </div>
                                                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setTimeDebugMatchKey((current) => current === matchCardKey ? "" : matchCardKey)}
+                                                        style={{
+                                                            fontSize: 11,
+                                                            fontWeight: 600,
+                                                            color: "#7c3aed",
+                                                            background: "#f5f3ff",
+                                                            border: "1px solid #ddd6fe",
+                                                            borderRadius: 6,
+                                                            padding: "4px 8px",
+                                                            cursor: "pointer",
+                                                        }}
+                                                    >
+                                                        {isTimeDebugOpen ? "隐藏时间详情" : "时间详情"}
+                                                    </button>
                                                     {getRawWsClockDisplay(match) && (
                                                         <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 600 }}>
                                                             {getRawWsClockDisplay(match)}
@@ -2636,6 +2786,50 @@ export default function SoccerEarlyMarketPage() {
                                                     </span>
                                                 </div>
                                             </div>
+
+                                            {isTimeDebugOpen ? (
+                                                <div
+                                                    style={{
+                                                        marginBottom: 12,
+                                                        padding: 12,
+                                                        borderRadius: 10,
+                                                        background: "#fafafa",
+                                                        border: "1px solid #e5e7eb",
+                                                        display: "flex",
+                                                        flexDirection: "column",
+                                                        gap: 10,
+                                                    }}
+                                                >
+                                                    {timeDebugGroups.map((group) => (
+                                                        <div
+                                                            key={group.key}
+                                                            style={{
+                                                                border: "1px solid #e5e7eb",
+                                                                borderRadius: 8,
+                                                                background: "#fff",
+                                                                overflow: "hidden",
+                                                            }}
+                                                        >
+                                                            <div style={{ padding: "8px 10px", background: "#f8fafc", borderBottom: "1px solid #e5e7eb" }}>
+                                                                <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{group.title}</div>
+                                                                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{group.source}</div>
+                                                            </div>
+                                                            <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", fontSize: 12 }}>
+                                                                {group.rows.map(([field, value]) => (
+                                                                    <React.Fragment key={`${group.key}_${field}`}>
+                                                                        <div style={{ padding: "6px 10px", borderTop: "1px solid #f3f4f6", color: "#6b7280", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                                                                            {field}
+                                                                        </div>
+                                                                        <div style={{ padding: "6px 10px", borderTop: "1px solid #f3f4f6", color: "#111827", wordBreak: "break-all", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                                                                            {formatTimeDebugValue(value)}
+                                                                        </div>
+                                                                    </React.Fragment>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : null}
 
                                             {match?.timeStatus === "1" ? (
                                                 Array.isArray(match?.treeResults) && match.treeResults.filter(isMavoDisplayable).length > 0 ? (
@@ -2747,7 +2941,8 @@ export default function SoccerEarlyMarketPage() {
                                                 </div>
                                             )}
                                         </div>
-                                    ))
+                                        );
+                                    })
                                 ) : (
                                     <div
                                         style={{

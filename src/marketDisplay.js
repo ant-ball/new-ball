@@ -107,6 +107,39 @@ function isCorrectScoreMarket(marketKey) {
   return CORRECT_SCORE_MARKET_IDS.has(getMarketId(marketKey));
 }
 
+function parseCorrectScoreLabel(label) {
+  const normalized = String(label ?? '').trim();
+  const matched = normalized.match(/^(\d+)\s*[-:]\s*(\d+)$/);
+
+  if (!matched) {
+    return null;
+  }
+
+  return {
+    home: matched[1],
+    away: matched[2],
+  };
+}
+
+function resolveCorrectScoreDirection(value, match) {
+  const normalized = normalizeTeamType(value, match);
+  return normalized === '1' || normalized === '2' || normalized === 'X' ? normalized : '';
+}
+
+function formatCorrectScoreLabel(rawScore, direction) {
+  const score = parseCorrectScoreLabel(rawScore);
+
+  if (!score) {
+    return String(rawScore ?? '').trim() || '-';
+  }
+
+  if (direction === '2') {
+    return `${score.away}-${score.home}`;
+  }
+
+  return `${score.home}-${score.away}`;
+}
+
 function getSelectionLabelByTeamType(teamType, match) {
   const combo = teamType != null ? String(teamType).split('&') : [];
   if (combo.length === 2) {
@@ -197,8 +230,8 @@ function formatPreSelectionLabel(match, marketKey, item) {
   }
 
   if (isCorrectScoreMarket(marketKey)) {
-    if (selectionLabel && nameText) return `${selectionLabel} ${nameText}`;
-    return selectionLabel || nameText || '-';
+    const direction = resolveCorrectScoreDirection(item?.team ?? item?.header, match);
+    return formatCorrectScoreLabel(nameText, direction);
   }
 
   if (isDoubleChanceMarket(marketKey) || isCombinedResultMarket(marketKey)) {
@@ -219,7 +252,9 @@ function formatPreSelectionLabel(match, marketKey, item) {
 function formatInplaySelectionLabel(match, mavo, pa) {
   const rawName = pa?.na ?? pa?.NA ?? pa?.pNa ?? '';
   const marketKey = mavo?.id ?? mavo?.ID;
-  const scoreHeader = isCorrectScoreMarket(marketKey) ? normalizeTeamType(pa?.ha ?? pa?.HA, match) : '';
+  const scoreHeader = isCorrectScoreMarket(marketKey)
+    ? resolveCorrectScoreDirection(pa?.pNa ?? pa?.n2 ?? pa?.N2 ?? pa?.ha ?? pa?.HA, match)
+    : '';
   const comboCode = (isCombinedResultMarket(marketKey) || isDoubleChanceMarket(marketKey))
     ? normalizeCompositeTeamType(rawName, match)
     : '';
@@ -241,8 +276,7 @@ function formatInplaySelectionLabel(match, mavo, pa) {
   }
 
   if (isCorrectScoreMarket(marketKey)) {
-    if (selectionLabel && rawName) return `${selectionLabel} ${String(rawName).trim()}`;
-    return selectionLabel || String(rawName || '').trim() || '-';
+    return formatCorrectScoreLabel(rawName, scoreHeader);
   }
 
   if (isDoubleChanceMarket(marketKey) || isCombinedResultMarket(marketKey)) {
@@ -261,10 +295,13 @@ function getMarketDisplayLabel(marketKey, fallback = '玩法') {
 }
 
 export {
+  formatCorrectScoreLabel,
   formatInplaySelectionLabel,
   formatPreSelectionLabel,
   getInplayTeamType,
   getMarketDisplayLabel,
   getPreTeamType,
+  parseCorrectScoreLabel,
+  resolveCorrectScoreDirection,
   normalizeTeamType,
 };
