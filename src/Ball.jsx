@@ -989,7 +989,7 @@ function getLiveClockDisplay(match, nowTick, sportIdValue = null) {
     }) ?? parseHalfFromPayload(match) ?? (baseMin < 45 ? 1 : 2);
     const halfLabel = half === 1 ? "上半场" : "下半场";
     const periodLabel = isBasketball && Number.isFinite(quarterNum) && quarterNum > 0 ? `第${quarterNum}节` : halfLabel;
-    const isPeriodTime = match?.liveClockIsPeriodTime === true;
+    const isPeriodTime = isBasketball && match?.liveClockIsPeriodTime === true;
     const displayMin = isPeriodTime
         ? Math.floor(totalSec / 60)
         : (isBasketball ? Math.floor(totalSec / 60) : (half === 1 ? Math.floor(totalSec / 60) : Math.floor((totalSec - 45 * 60) / 60)));
