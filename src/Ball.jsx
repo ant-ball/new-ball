@@ -1006,8 +1006,28 @@ function formatTimeDebugValue(value) {
     return String(value);
 }
 
+function formatElapsedClockLabel(totalSeconds) {
+    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "-";
+    const minute = Math.floor(totalSeconds / 60);
+    const second = Math.floor(totalSeconds % 60);
+    return `${minute}分${String(second).padStart(2, "0")}秒`;
+}
+
+function getElapsedSecondsSinceKickoff(match) {
+    const kickoffMs = getMatchKickoffMs(match) ?? getKickoffMs(match);
+    if (kickoffMs == null || !Number.isFinite(Number(kickoffMs))) return null;
+    return Math.max(0, Math.floor((Date.now() - Number(kickoffMs)) / 1000));
+}
+
 function buildTimeDebugGroups(match) {
     const latestMavo = getLatestRollingMavo(match);
+    const elapsedSinceKickoff = getElapsedSecondsSinceKickoff(match);
+    const liveMinute = Number(match?.liveClockMinute);
+    const liveSecond = Number(match?.liveClockSecond);
+    const liveTotalSeconds = Number.isFinite(liveMinute) ? liveMinute * 60 + (Number.isFinite(liveSecond) ? liveSecond : 0) : null;
+    const elapsedDriftSeconds = Number.isFinite(elapsedSinceKickoff) && Number.isFinite(liveTotalSeconds)
+        ? elapsedSinceKickoff - liveTotalSeconds
+        : null;
 
     return [
         {
@@ -1060,6 +1080,10 @@ function buildTimeDebugGroups(match) {
                 ["liveClockIsPeriodTime", match?.liveClockIsPeriodTime],
                 ["liveClockSource", match?.liveClockSource],
                 ["liveClockKey", match?.liveClockKey],
+                ["kickoffElapsedNow", formatElapsedClockLabel(elapsedSinceKickoff)],
+                ["kickoffElapsedMinutes", Number.isFinite(elapsedSinceKickoff) ? Math.floor(elapsedSinceKickoff / 60) : "-"],
+                ["clockDriftVsKickoff", Number.isFinite(elapsedDriftSeconds) ? `${elapsedDriftSeconds >= 0 ? "+" : ""}${elapsedDriftSeconds}s` : "-"],
+                ["halfByKickoffElapsed", Number.isFinite(elapsedSinceKickoff) ? (Math.floor(elapsedSinceKickoff / 60) <= 45 ? 1 : 2) : "-"],
                 ["liveClockDisplay", getLiveClockDisplay(match, Date.now(), Number(match?.sportId ?? match?.sport_id) || null)],
                 ["matchTimeDisplay", getMatchTime(match)],
                 ["scoreDisplay", getScore(match)],
