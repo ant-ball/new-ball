@@ -996,6 +996,9 @@ function getRawWsClockDisplay(match) {
 
 function formatTimeDebugValue(value) {
     if (value == null || value === "") return "-";
+    if (typeof value === "object" && value.raw != null && value.local != null) {
+        return `${value.raw} => ${value.local}`;
+    }
     if (typeof value === "object") {
         try {
             return JSON.stringify(value);
@@ -1011,6 +1014,43 @@ function formatElapsedClockLabel(totalSeconds) {
     const minute = Math.floor(totalSeconds / 60);
     const second = Math.floor(totalSeconds % 60);
     return `${minute}分${String(second).padStart(2, "0")}秒`;
+}
+
+function formatLocalDateTimeFromMs(ts) {
+    if (ts == null || ts === "") return null;
+    const num = Number(ts);
+    if (!Number.isFinite(num)) return null;
+    const date = new Date(num);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleString("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+    });
+}
+
+function normalizeTimeLikeValue(raw, kind = "auto") {
+    if (raw == null || raw === "") return null;
+    const str = String(raw).trim();
+    if (!str) return null;
+
+    let ts = null;
+    if (kind === "tu" || (/^\d{14}$/.test(str) && kind === "auto")) {
+        ts = parseTUToUtcMs(str);
+    } else {
+        const num = Number(str);
+        if (Number.isFinite(num)) {
+            ts = num < 1e12 ? num * 1000 : num;
+        }
+    }
+
+    if (ts == null) return { raw: str, local: "-" };
+    const local = formatLocalDateTimeFromMs(ts);
+    return local ? { raw: str, local } : { raw: str, local: "-" };
 }
 
 function getElapsedSecondsSinceKickoff(match) {
@@ -1040,12 +1080,12 @@ function buildTimeDebugGroups(match) {
                 ["TT/tt", match?.TT ?? match?.tt],
                 ["TM/tm", match?.TM ?? match?.tm],
                 ["TS/ts", match?.TS ?? match?.ts],
-                ["TU/tu", match?.TU ?? match?.tu],
+                ["TU/tu", normalizeTimeLikeValue(match?.TU ?? match?.tu, "tu")],
                 ["Q/q", match?.Q ?? match?.q],
-                ["time", match?.time],
-                ["matchTime", match?.matchTime],
-                ["startTime", match?.startTime],
-                ["eventTime", match?.eventTime],
+                ["time", normalizeTimeLikeValue(match?.time)],
+                ["matchTime", normalizeTimeLikeValue(match?.matchTime)],
+                ["startTime", normalizeTimeLikeValue(match?.startTime)],
+                ["eventTime", normalizeTimeLikeValue(match?.eventTime)],
                 ["ballScore", match?.ballScore],
             ],
         },
@@ -1056,12 +1096,12 @@ function buildTimeDebugGroups(match) {
             rows: [
                 ["mavo.id", latestMavo?.id ?? latestMavo?.ID],
                 ["mavo.name", latestMavo?.na ?? latestMavo?.NA],
-                ["mavo.updateAt", latestMavo?.updateAt ?? latestMavo?.UpdateAt],
+                ["mavo.updateAt", normalizeTimeLikeValue(latestMavo?.updateAt ?? latestMavo?.UpdateAt)],
                 ["mavo.CP/cp", latestMavo?.CP ?? latestMavo?.cp],
                 ["mavo.TT/tt", latestMavo?.TT ?? latestMavo?.tt],
                 ["mavo.TM/tm", latestMavo?.TM ?? latestMavo?.tm],
                 ["mavo.TS/ts", latestMavo?.TS ?? latestMavo?.ts],
-                ["mavo.TU/tu", latestMavo?.TU ?? latestMavo?.tu],
+                ["mavo.TU/tu", normalizeTimeLikeValue(latestMavo?.TU ?? latestMavo?.tu, "tu")],
                 ["mavo.Q/q", latestMavo?.Q ?? latestMavo?.q],
                 ["mavo.SS/ss", latestMavo?.SS ?? latestMavo?.ss],
             ],
@@ -1074,12 +1114,13 @@ function buildTimeDebugGroups(match) {
                 ["rawWsClockDisplay", getRawWsClockDisplay(match)],
                 ["liveClockMinute", match?.liveClockMinute],
                 ["liveClockSecond", match?.liveClockSecond],
-                ["liveClockUpdatedAt", match?.liveClockUpdatedAt],
+                ["liveClockUpdatedAt", normalizeTimeLikeValue(match?.liveClockUpdatedAt)],
                 ["liveHalf", match?.liveHalf],
                 ["liveClockOnBreak", match?.liveClockOnBreak],
                 ["liveClockIsPeriodTime", match?.liveClockIsPeriodTime],
                 ["liveClockSource", match?.liveClockSource],
                 ["liveClockKey", match?.liveClockKey],
+                ["currentLocalNow", formatLocalDateTimeFromMs(Date.now())],
                 ["kickoffElapsedNow", formatElapsedClockLabel(elapsedSinceKickoff)],
                 ["kickoffElapsedMinutes", Number.isFinite(elapsedSinceKickoff) ? Math.floor(elapsedSinceKickoff / 60) : "-"],
                 ["clockDriftVsKickoff", Number.isFinite(elapsedDriftSeconds) ? `${elapsedDriftSeconds >= 0 ? "+" : ""}${elapsedDriftSeconds}s` : "-"],
@@ -2844,7 +2885,7 @@ export default function SoccerEarlyMarketPage() {
                                                                         <div style={{ padding: "6px 10px", borderTop: "1px solid #f3f4f6", color: "#6b7280", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
                                                                             {field}
                                                                         </div>
-                                                                        <div style={{ padding: "6px 10px", borderTop: "1px solid #f3f4f6", color: "#111827", wordBreak: "break-all", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                                                                        <div style={{ padding: "6px 10px", borderTop: "1px solid #f3f4f6", color: "#111827", wordBreak: "break-all", whiteSpace: "pre-line", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
                                                                             {formatTimeDebugValue(value)}
                                                                         </div>
                                                                     </React.Fragment>
