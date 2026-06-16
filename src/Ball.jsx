@@ -73,6 +73,10 @@ function normalizeMavoFromWs(mavo) {
 
 function applyClockAnchorFromPush(match, push) {
     if (!match || !push) return match;
+    const incomingSignature = push.clockBaseSignature != null && push.clockBaseSignature !== "" ? String(push.clockBaseSignature) : "";
+    const existingSignature = match.clockBaseSignature != null && match.clockBaseSignature !== "" ? String(match.clockBaseSignature) : "";
+    if (!incomingSignature) return match;
+    if (incomingSignature === existingSignature) return match;
     const anchor = {};
     ["clockBaseTM", "clockBaseTS", "clockBaseCP", "clockBaseTT", "clockBaseReceivedAt", "clockBaseElapsedSeconds", "clockEstimatedElapsedSeconds", "clockBaseSignature"].forEach((key) => {
         if (push[key] != null && push[key] !== "") {
@@ -463,7 +467,13 @@ function hydrateMatchClockFromRawMatch(match, nowMs = Date.now()) {
 
     const safeMinute = Number.isFinite(minute) ? Math.max(0, minute) : 0;
     const safeSecond = Number.isFinite(second) ? Math.max(0, Math.min(59, second)) : 0;
-    const half = match?.liveHalf ?? parseHalfFromPayload(anchorHalfPayload) ?? parseHalfFromPayload(match) ?? (safeMinute <= 45 ? 1 : 2);
+    const estimatedElapsedNum = Number(match?.clockEstimatedElapsedSeconds);
+    const fallbackElapsedSeconds = Number.isFinite(estimatedElapsedNum)
+        ? Math.max(0, estimatedElapsedNum)
+        : (safeMinute * 60 + safeSecond);
+    const half = parseHalfFromPayload(anchorHalfPayload, fallbackElapsedSeconds)
+        ?? parseHalfFromPayload(match, fallbackElapsedSeconds)
+        ?? (fallbackElapsedSeconds < 45 * 60 ? 1 : 2);
     const anchorReceivedAt = match?.clockBaseReceivedAt != null ? Number(match.clockBaseReceivedAt) : null;
     return {
         ...match,
@@ -688,24 +698,22 @@ function isTtBreak(mavo) {
     return n === 0;
 }
 
-/** 解析半场：Bet365 标准用 CP(CURRENT_PERIOD)：1=上半场 2=下半场。TT 官方含义为 playing/break，不能当半场用。无 CP 时用 TM（比赛分钟）推断：≤45 上半场，>45 下半场；再兜底用 tt 0=上 1=下 */
-function parseHalfFromPayload(mavo) {
+/** 解析半场：Bet365 标准用 CP(CURRENT_PERIOD)：1=上半场 2=下半场。TT 官方含义为 playing/break，不能当半场用。无 CP 时优先看累计比赛秒数，再看 TM（比赛分钟）推断。 */
+function parseHalfFromPayload(mavo, fallbackElapsedSeconds = null) {
     const cp = mavo?.cp ?? mavo?.CP;
     if (cp != null && cp !== "") {
         const n = typeof cp === "string" ? parseInt(cp, 10) : Number(cp);
         if (n === 1) return 1;
         if (n === 2) return 2;
     }
+    const elapsedNum = Number(fallbackElapsedSeconds);
+    if (Number.isFinite(elapsedNum)) {
+        return elapsedNum < 45 * 60 ? 1 : 2;
+    }
     const tM = mavo?.tM ?? mavo?.TM;
     if (tM != null && tM !== "") {
         const n = typeof tM === "string" ? parseInt(tM, 10) : Number(tM);
         if (Number.isFinite(n)) return n <= 45 ? 1 : 2;
-    }
-    const tt = mavo?.tt ?? mavo?.TT;
-    if (tt != null && tt !== "") {
-        const n = typeof tt === "string" ? parseInt(tt, 10) : Number(tt);
-        if (n === 0) return 1;
-        if (n === 1) return 2;
     }
     return null;
 }
@@ -977,7 +985,7 @@ function getLiveClockDisplay(match, nowTick, sportIdValue = null) {
     const latestMavo = getLatestRollingMavo(match);
     const quarterRaw = match?.q ?? match?.Q ?? latestMavo?.q ?? latestMavo?.Q ?? match?.liveQuarter ?? match?.livePeriod;
     const quarterNum = Number(quarterRaw);
-    const half = match?.liveHalf ?? parseHalfFromPayload({
+    const half = parseHalfFromPayload({
         cp: match?.clockBaseCP,
         CP: match?.clockBaseCP,
         tt: match?.clockBaseTT,
@@ -986,7 +994,7 @@ function getLiveClockDisplay(match, nowTick, sportIdValue = null) {
         TM: match?.clockBaseTM ?? match?.tm ?? match?.TM,
         ts: match?.clockBaseTS ?? match?.ts ?? match?.TS,
         TS: match?.clockBaseTS ?? match?.ts ?? match?.TS,
-    }) ?? parseHalfFromPayload(match) ?? (baseMin < 45 ? 1 : 2);
+    }, totalSec) ?? parseHalfFromPayload(match, totalSec) ?? (totalSec < 45 * 60 ? 1 : 2);
     const halfLabel = half === 1 ? "上半场" : "下半场";
     const periodLabel = isBasketball && Number.isFinite(quarterNum) && quarterNum > 0 ? `第${quarterNum}节` : halfLabel;
     const isPeriodTime = isBasketball && match?.liveClockIsPeriodTime === true;

@@ -177,6 +177,7 @@ function getLiveClockDisplay(match) {
   if (match?.timeStatus !== '1' && match?.rolling !== true) return '';
   const min = Number(match?.liveClockMinute ?? match?.tM ?? 0);
   const sec = Number(match?.liveClockSecond ?? match?.tS ?? 0);
+  const elapsedSeconds = Number(match?.clockEstimatedElapsedSeconds);
   const hasClock = (
     match?.liveClockMinute != null ||
     match?.liveClockSecond != null ||
@@ -185,7 +186,7 @@ function getLiveClockDisplay(match) {
   );
   if (!hasClock && min === 0 && sec === 0) return '';
   if (Number.isNaN(min) || Number.isNaN(sec)) return '';
-  const half = match?.liveHalf ?? (min < 45 ? 1 : 2);
+  const half = match?.liveHalf ?? (Number.isFinite(elapsedSeconds) ? (elapsedSeconds < 45 * 60 ? 1 : 2) : (min < 45 ? 1 : 2));
   const halfLabel = half === 1 ? '上半场' : '下半场';
   return `${halfLabel} ${Math.max(0, min)}:${String(Math.max(0, Math.min(59, sec))).padStart(2, '0')}`;
 }

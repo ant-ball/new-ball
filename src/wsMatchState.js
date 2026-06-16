@@ -31,6 +31,10 @@ function normalizeMavoFromWs(mavo) {
 
 function applyClockAnchorFromPush(match, push) {
   if (!match || !push) return match;
+  const incomingSignature = push.clockBaseSignature != null && push.clockBaseSignature !== '' ? String(push.clockBaseSignature) : '';
+  const existingSignature = match.clockBaseSignature != null && match.clockBaseSignature !== '' ? String(match.clockBaseSignature) : '';
+  if (!incomingSignature) return match;
+  if (incomingSignature === existingSignature) return match;
   const anchor = {};
   ['clockBaseTM', 'clockBaseTS', 'clockBaseCP', 'clockBaseTT', 'clockBaseReceivedAt', 'clockBaseElapsedSeconds', 'clockEstimatedElapsedSeconds', 'clockBaseSignature'].forEach((key) => {
     if (push[key] != null && push[key] !== '') {
@@ -153,7 +157,11 @@ function applyEventResultSnapshot(prevRaw, snapshot) {
       const minute = item?.tm != null ? Number(item.tm) : null;
       const second = item?.ts != null ? Number(item.ts) : null;
       const scoreStr = item?.ss != null ? String(item.ss) : (item?.ballScore != null ? String(item.ballScore) : null);
-      const liveHalf = minute != null ? (minute <= 45 ? 1 : 2) : null;
+      const elapsedSecondsRaw = item?.clockEstimatedElapsedSeconds ?? next?.clockEstimatedElapsedSeconds;
+      const elapsedSeconds = Number(elapsedSecondsRaw);
+      const liveHalf = Number.isFinite(elapsedSeconds)
+        ? (elapsedSeconds < 45 * 60 ? 1 : 2)
+        : (minute != null ? (minute <= 45 ? 1 : 2) : null);
 
       if (timeStatus != null) next.timeStatus = timeStatus;
       if (minute != null || second != null) {
