@@ -29,6 +29,18 @@ function normalizeMavoFromWs(mavo) {
   return mavo;
 }
 
+function applyClockAnchorFromPush(match, push) {
+  if (!match || !push) return match;
+  const anchor = {};
+  ['clockBaseTM', 'clockBaseTS', 'clockBaseCP', 'clockBaseTT', 'clockBaseReceivedAt', 'clockBaseElapsedSeconds', 'clockBaseSignature'].forEach((key) => {
+    if (push[key] != null && push[key] !== '') {
+      anchor[key] = push[key];
+    }
+  });
+  if (Object.keys(anchor).length === 0) return match;
+  return { ...match, ...anchor, liveClockSource: 'anchor' };
+}
+
 function mergeMavoPaIntoExisting(existingMavo, pushMavo) {
   if (!existingMavo || !pushMavo) return existingMavo;
   const existingCo = Array.isArray(existingMavo.co) ? existingMavo.co : [];
@@ -105,7 +117,7 @@ function mergeMavoIntoMatchRaw(prevRaw, mavo) {
       } else {
         tree.push(mavo);
       }
-      return { ...match, treeResults: tree };
+      return applyClockAnchorFromPush({ ...match, treeResults: tree }, mavo);
     });
     return { ...group, value: newValue };
   });
@@ -136,7 +148,7 @@ function applyEventResultSnapshot(prevRaw, snapshot) {
       if (!item) return match;
 
       updated = true;
-      const next = { ...match };
+      const next = applyClockAnchorFromPush({ ...match }, item);
       const timeStatus = item?.timeStatus != null ? String(item.timeStatus) : null;
       const minute = item?.tm != null ? Number(item.tm) : null;
       const second = item?.ts != null ? Number(item.ts) : null;

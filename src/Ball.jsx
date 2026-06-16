@@ -71,6 +71,22 @@ function normalizeMavoFromWs(mavo) {
     return mavo;
 }
 
+function applyClockAnchorFromPush(match, push) {
+    if (!match || !push) return match;
+    const anchor = {};
+    ["clockBaseTM", "clockBaseTS", "clockBaseCP", "clockBaseTT", "clockBaseReceivedAt", "clockBaseElapsedSeconds", "clockBaseSignature"].forEach((key) => {
+        if (push[key] != null && push[key] !== "") {
+            anchor[key] = push[key];
+        }
+    });
+    if (Object.keys(anchor).length === 0) return match;
+    return {
+        ...match,
+        ...anchor,
+        liveClockSource: "anchor",
+    };
+}
+
 /** 从合并前的数据里找出本场、本玩法中「赔率发生变化」的选项 id 列表（用于只高亮变化的赔率）。
  * 包含：新推送里赔率与旧不同的选项、旧有但新推送里没有的选项、以及旧有但新推送里变为空的选项。
  */
@@ -158,7 +174,7 @@ function mergeMavoIntoMatchRaw(prevRaw, mavo) {
             } else {
                 tree.push(mavo);
             }
-            let updatedMatch = { ...match, treeResults: tree };
+            let updatedMatch = applyClockAnchorFromPush({ ...match, treeResults: tree }, mavo);
             const pushScore = mavo.sS ?? mavo.SS;
             if (pushScore != null) updatedMatch.ballScore = String(pushScore);
             const pushQuarter = mavo.q ?? mavo.Q;
@@ -952,9 +968,11 @@ function getLiveClockDisplay(match, nowTick, sportIdValue = null) {
     if (!Number.isFinite(baseMinNum) && !Number.isFinite(baseSecNum)) return null;
     const baseMin = Number.isFinite(baseMinNum) ? Math.max(0, baseMinNum) : 0;
     const baseSec = Number.isFinite(baseSecNum) ? Math.max(0, Math.min(59, baseSecNum)) : 0;
+    const baseElapsedNum = Number(match?.clockBaseElapsedSeconds);
+    const baseTotalSec = Number.isFinite(baseElapsedNum) ? Math.max(0, baseElapsedNum) : baseMin * 60 + baseSec;
     const updatedAt = match?.clockBaseReceivedAt ?? match?.liveClockUpdatedAt;
     if (updatedAt == null && baseMin == null && baseSec == null) return null;
-    const totalSec = baseMin * 60 + baseSec + (onBreak ? 0 : (updatedAt != null && nowTick != null ? Math.max(0, Math.floor((nowTick - updatedAt) / 1000)) : 0));
+    const totalSec = baseTotalSec + (onBreak ? 0 : (updatedAt != null && nowTick != null ? Math.max(0, Math.floor((nowTick - updatedAt) / 1000)) : 0));
     const isBasketball = Number(sportIdValue ?? match?.sportId ?? match?.sport_id) === 18;
     const latestMavo = getLatestRollingMavo(match);
     const quarterRaw = match?.q ?? match?.Q ?? latestMavo?.q ?? latestMavo?.Q ?? match?.liveQuarter ?? match?.livePeriod;
@@ -1138,6 +1156,7 @@ function buildTimeDebugGroups(match) {
                 ["clockBaseCP", match?.clockBaseCP],
                 ["clockBaseTT", match?.clockBaseTT],
                 ["clockBaseReceivedAt", normalizeTimeLikeValue(match?.clockBaseReceivedAt)],
+                ["clockBaseElapsedSeconds", match?.clockBaseElapsedSeconds],
                 ["clockBaseSignature", match?.clockBaseSignature],
             ],
         },
@@ -1596,7 +1615,7 @@ export default function SoccerEarlyMarketPage() {
                         const match = value[i];
                         const mid = match?.id != null ? String(match.id) : match?.bet365Id != null ? String(match.bet365Id) : null;
                         if (mid !== eventIdStr) continue;
-                        const next = { ...match };
+                        const next = applyClockAnchorFromPush({ ...match }, item);
                         if (timeStatus != null) next.timeStatus = timeStatus;
                         if (Number.isFinite(quarterNum)) {
                             next.q = quarterNum;
