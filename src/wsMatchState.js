@@ -32,7 +32,7 @@ function normalizeMavoFromWs(mavo) {
 function applyClockAnchorFromPush(match, push) {
   if (!match || !push) return match;
   const anchor = {};
-  ['clockBaseTM', 'clockBaseTS', 'clockBaseCP', 'clockBaseTT', 'clockBaseReceivedAt', 'clockBaseElapsedSeconds', 'clockBaseSignature'].forEach((key) => {
+  ['clockBaseTM', 'clockBaseTS', 'clockBaseCP', 'clockBaseTT', 'clockBaseReceivedAt', 'clockBaseElapsedSeconds', 'clockEstimatedElapsedSeconds', 'clockBaseSignature'].forEach((key) => {
     if (push[key] != null && push[key] !== '') {
       anchor[key] = push[key];
     }

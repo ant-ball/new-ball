@@ -74,7 +74,7 @@ function normalizeMavoFromWs(mavo) {
 function applyClockAnchorFromPush(match, push) {
     if (!match || !push) return match;
     const anchor = {};
-    ["clockBaseTM", "clockBaseTS", "clockBaseCP", "clockBaseTT", "clockBaseReceivedAt", "clockBaseElapsedSeconds", "clockBaseSignature"].forEach((key) => {
+    ["clockBaseTM", "clockBaseTS", "clockBaseCP", "clockBaseTT", "clockBaseReceivedAt", "clockBaseElapsedSeconds", "clockEstimatedElapsedSeconds", "clockBaseSignature"].forEach((key) => {
         if (push[key] != null && push[key] !== "") {
             anchor[key] = push[key];
         }
@@ -968,7 +968,7 @@ function getLiveClockDisplay(match, nowTick, sportIdValue = null) {
     if (!Number.isFinite(baseMinNum) && !Number.isFinite(baseSecNum)) return null;
     const baseMin = Number.isFinite(baseMinNum) ? Math.max(0, baseMinNum) : 0;
     const baseSec = Number.isFinite(baseSecNum) ? Math.max(0, Math.min(59, baseSecNum)) : 0;
-    const baseElapsedNum = Number(match?.clockBaseElapsedSeconds);
+    const baseElapsedNum = Number(match?.clockEstimatedElapsedSeconds ?? match?.clockBaseElapsedSeconds);
     const baseTotalSec = Number.isFinite(baseElapsedNum) ? Math.max(0, baseElapsedNum) : baseMin * 60 + baseSec;
     const updatedAt = match?.clockBaseReceivedAt ?? match?.liveClockUpdatedAt;
     if (updatedAt == null && baseMin == null && baseSec == null) return null;
@@ -1157,6 +1157,7 @@ function buildTimeDebugGroups(match) {
                 ["clockBaseTT", match?.clockBaseTT],
                 ["clockBaseReceivedAt", normalizeTimeLikeValue(match?.clockBaseReceivedAt)],
                 ["clockBaseElapsedSeconds", match?.clockBaseElapsedSeconds],
+                ["clockEstimatedElapsedSeconds", match?.clockEstimatedElapsedSeconds],
                 ["clockBaseSignature", match?.clockBaseSignature],
             ],
         },
