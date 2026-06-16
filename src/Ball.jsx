@@ -427,25 +427,38 @@ function getMatchKey(match, index) {
 function hydrateMatchClockFromRawMatch(match, nowMs = Date.now()) {
     if (!match || typeof match !== "object") return match;
 
-    const minuteRaw = match?.liveClockMinute ?? match?.tm ?? match?.TM;
-    const secondRaw = match?.liveClockSecond ?? match?.ts ?? match?.TS;
+    const anchorMinuteRaw = match?.clockBaseTM;
+    const anchorSecondRaw = match?.clockBaseTS;
+    const anchorHalfPayload = {
+        cp: match?.clockBaseCP,
+        CP: match?.clockBaseCP,
+        tt: match?.clockBaseTT,
+        TT: match?.clockBaseTT,
+        tm: match?.clockBaseTM,
+        TM: match?.clockBaseTM,
+        ts: match?.clockBaseTS,
+        TS: match?.clockBaseTS,
+    };
+    const minuteRaw = anchorMinuteRaw ?? match?.liveClockMinute ?? match?.tm ?? match?.TM;
+    const secondRaw = anchorSecondRaw ?? match?.liveClockSecond ?? match?.ts ?? match?.TS;
     const minute = Number(minuteRaw);
     const second = Number(secondRaw);
     if (!Number.isFinite(minute) && !Number.isFinite(second)) return match;
 
     const safeMinute = Number.isFinite(minute) ? Math.max(0, minute) : 0;
     const safeSecond = Number.isFinite(second) ? Math.max(0, Math.min(59, second)) : 0;
-    const half = match?.liveHalf ?? parseHalfFromPayload(match) ?? (safeMinute <= 45 ? 1 : 2);
+    const half = match?.liveHalf ?? parseHalfFromPayload(anchorHalfPayload) ?? parseHalfFromPayload(match) ?? (safeMinute <= 45 ? 1 : 2);
+    const anchorReceivedAt = match?.clockBaseReceivedAt != null ? Number(match.clockBaseReceivedAt) : null;
     return {
         ...match,
         timeStatus: match?.timeStatus ?? String(match?.timeStatus ?? match?.tt ?? match?.TT ?? ""),
         liveClockMinute: safeMinute,
         liveClockSecond: safeSecond,
-        liveClockUpdatedAt: match?.liveClockUpdatedAt ?? nowMs,
+        liveClockUpdatedAt: Number.isFinite(anchorReceivedAt) ? anchorReceivedAt : (match?.liveClockUpdatedAt ?? nowMs),
         liveHalf: half,
         liveClockIsPeriodTime: true,
         liveClockOnBreak: isTtBreak(match),
-        liveClockSource: match?.liveClockSource ?? "snapshot",
+        liveClockSource: match?.liveClockSource ?? (match?.clockBaseReceivedAt != null ? "anchor" : "snapshot"),
         liveClockKey: buildLiveClockKey(half, safeMinute, safeSecond),
     };
 }
@@ -932,21 +945,30 @@ function getScore(match) {
 function getLiveClockDisplay(match, nowTick, sportIdValue = null) {
     if (match?.timeStatus !== "1") return null;
     const onBreak = match?.liveClockOnBreak === true;
-    const baseMinRaw = match?.liveClockMinute ?? match?.tm ?? match?.TM;
-    const baseSecRaw = match?.liveClockSecond ?? match?.ts ?? match?.TS;
+    const baseMinRaw = match?.clockBaseTM ?? match?.liveClockMinute ?? match?.tm ?? match?.TM;
+    const baseSecRaw = match?.clockBaseTS ?? match?.liveClockSecond ?? match?.ts ?? match?.TS;
     const baseMinNum = Number(baseMinRaw);
     const baseSecNum = Number(baseSecRaw);
     if (!Number.isFinite(baseMinNum) && !Number.isFinite(baseSecNum)) return null;
     const baseMin = Number.isFinite(baseMinNum) ? Math.max(0, baseMinNum) : 0;
     const baseSec = Number.isFinite(baseSecNum) ? Math.max(0, Math.min(59, baseSecNum)) : 0;
-    const updatedAt = match?.liveClockUpdatedAt;
+    const updatedAt = match?.clockBaseReceivedAt ?? match?.liveClockUpdatedAt;
     if (updatedAt == null && baseMin == null && baseSec == null) return null;
     const totalSec = baseMin * 60 + baseSec + (onBreak ? 0 : (updatedAt != null && nowTick != null ? Math.max(0, Math.floor((nowTick - updatedAt) / 1000)) : 0));
     const isBasketball = Number(sportIdValue ?? match?.sportId ?? match?.sport_id) === 18;
     const latestMavo = getLatestRollingMavo(match);
     const quarterRaw = match?.q ?? match?.Q ?? latestMavo?.q ?? latestMavo?.Q ?? match?.liveQuarter ?? match?.livePeriod;
     const quarterNum = Number(quarterRaw);
-    const half = match?.liveHalf ?? parseHalfFromPayload(match) ?? (baseMin < 45 ? 1 : 2);
+    const half = match?.liveHalf ?? parseHalfFromPayload({
+        cp: match?.clockBaseCP,
+        CP: match?.clockBaseCP,
+        tt: match?.clockBaseTT,
+        TT: match?.clockBaseTT,
+        tm: match?.clockBaseTM ?? match?.tm ?? match?.TM,
+        TM: match?.clockBaseTM ?? match?.tm ?? match?.TM,
+        ts: match?.clockBaseTS ?? match?.ts ?? match?.TS,
+        TS: match?.clockBaseTS ?? match?.ts ?? match?.TS,
+    }) ?? parseHalfFromPayload(match) ?? (baseMin < 45 ? 1 : 2);
     const halfLabel = half === 1 ? "上半场" : "下半场";
     const periodLabel = isBasketball && Number.isFinite(quarterNum) && quarterNum > 0 ? `第${quarterNum}节` : halfLabel;
     const isPeriodTime = match?.liveClockIsPeriodTime === true;
@@ -1104,6 +1126,19 @@ function buildTimeDebugGroups(match) {
                 ["mavo.TU/tu", normalizeTimeLikeValue(latestMavo?.TU ?? latestMavo?.tu, "tu")],
                 ["mavo.Q/q", latestMavo?.Q ?? latestMavo?.q],
                 ["mavo.SS/ss", latestMavo?.SS ?? latestMavo?.ss],
+            ],
+        },
+        {
+            key: "clockAnchor",
+            title: "后端时间锚点",
+            source: "后端首次收到同一组 TM/TS 时写入，前端据此补秒",
+            rows: [
+                ["clockBaseTM", match?.clockBaseTM],
+                ["clockBaseTS", match?.clockBaseTS],
+                ["clockBaseCP", match?.clockBaseCP],
+                ["clockBaseTT", match?.clockBaseTT],
+                ["clockBaseReceivedAt", normalizeTimeLikeValue(match?.clockBaseReceivedAt)],
+                ["clockBaseSignature", match?.clockBaseSignature],
             ],
         },
         {
