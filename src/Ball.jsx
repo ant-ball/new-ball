@@ -968,7 +968,7 @@ function getLiveClockDisplay(match, nowTick, sportIdValue = null) {
     if (!Number.isFinite(baseMinNum) && !Number.isFinite(baseSecNum)) return null;
     const baseMin = Number.isFinite(baseMinNum) ? Math.max(0, baseMinNum) : 0;
     const baseSec = Number.isFinite(baseSecNum) ? Math.max(0, Math.min(59, baseSecNum)) : 0;
-    const baseElapsedNum = Number(match?.clockEstimatedElapsedSeconds ?? match?.clockBaseElapsedSeconds);
+    const baseElapsedNum = Number(match?.clockEstimatedElapsedSeconds);
     const baseTotalSec = Number.isFinite(baseElapsedNum) ? Math.max(0, baseElapsedNum) : baseMin * 60 + baseSec;
     const updatedAt = match?.clockBaseReceivedAt ?? match?.liveClockUpdatedAt;
     if (updatedAt == null && baseMin == null && baseSec == null) return null;
