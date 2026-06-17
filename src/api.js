@@ -23,6 +23,13 @@ function buildQuery(params = {}) {
     return search.toString();
 }
 
+function buildSoccerDebugQuery(params = {}) {
+    return buildQuery({
+        ...params,
+        isDebug: true,
+    });
+}
+
 function buildAuthHeaders(extra = {}) {
     const token = getStoredBallToken();
     return {
@@ -48,7 +55,7 @@ export async function getLeagueGroup({
     day,
     daysOfTime = 1,
 } = {}) {
-    const query = buildQuery({
+    const query = buildSoccerDebugQuery({
         type,
         sportId,
         sport_id: sportId,
@@ -62,7 +69,8 @@ export async function getLeagueGroup({
 }
 
 export async function getAssociation({ baseUrl = DEFAULT_BASE_URL } = {}) {
-    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/soccer/event/association`;
+    const query = buildSoccerDebugQuery();
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/soccer/event/association?${query}`;
     const { response, json } = await requestJson(url);
     if (!response.ok) throw new Error(`association 失败 HTTP ${response.status}`);
     return { url, data: json };
@@ -250,7 +258,7 @@ export async function getBet365All({
     if (leagueIds == null || leagueIds === "") {
         throw new Error("leagueIds 不能为空");
     }
-    const query = buildQuery({
+    const query = buildSoccerDebugQuery({
         day: normalizeDayParam(day),
         leagueIds,
         daysOfTime,
