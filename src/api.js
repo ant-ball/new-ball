@@ -135,6 +135,26 @@ export async function getOrderList({
     return { url, data: json };
 }
 
+export async function previewOrderSettlement({
+    baseUrl = DEFAULT_BASE_URL,
+    orderId,
+    homeScore,
+    awayScore,
+} = {}) {
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/settlement-preview`;
+    const { response, json } = await requestJson(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            orderId,
+            homeScore,
+            awayScore,
+        }),
+    });
+    if (!response.ok) throw new Error(`order/settlement-preview 失败 HTTP ${response.status}`);
+    return { url, data: json };
+}
+
 export async function getOrderFlow({ baseUrl = DEFAULT_BASE_URL } = {}) {
     const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/flow`;
     const { response, json } = await requestJson(url);

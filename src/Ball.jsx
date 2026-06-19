@@ -6,6 +6,7 @@ import {
     createOrder,
     createContactOrder,
     getOrderList,
+    previewOrderSettlement,
     getOrderFlow,
     getUserBalance,
     getUserBalanceBills,
@@ -1489,6 +1490,13 @@ export default function SoccerEarlyMarketPage() {
     const [orderResultError, setOrderResultError] = useState("");
     const [orderResultOrder, setOrderResultOrder] = useState(null);
     const [orderResultData, setOrderResultData] = useState(null);
+    const [settlementPreviewVisible, setSettlementPreviewVisible] = useState(false);
+    const [settlementPreviewLoading, setSettlementPreviewLoading] = useState(false);
+    const [settlementPreviewError, setSettlementPreviewError] = useState("");
+    const [settlementPreviewOrder, setSettlementPreviewOrder] = useState(null);
+    const [settlementPreviewData, setSettlementPreviewData] = useState(null);
+    const [settlementPreviewHomeScore, setSettlementPreviewHomeScore] = useState("");
+    const [settlementPreviewAwayScore, setSettlementPreviewAwayScore] = useState("");
     const [userBalance, setUserBalance] = useState(null);
     const [transferVisible, setTransferVisible] = useState(false);
     const [transferLoadingTypes, setTransferLoadingTypes] = useState(false);
@@ -2357,6 +2365,58 @@ export default function SoccerEarlyMarketPage() {
             setOrderResultLoading(false);
         }
     }, [baseUrl]);
+
+    const closeSettlementPreviewModal = useCallback(() => {
+        setSettlementPreviewVisible(false);
+        setSettlementPreviewLoading(false);
+        setSettlementPreviewError("");
+        setSettlementPreviewOrder(null);
+        setSettlementPreviewData(null);
+        setSettlementPreviewHomeScore("");
+        setSettlementPreviewAwayScore("");
+    }, []);
+
+    const openSettlementPreviewModal = useCallback((order) => {
+        setSettlementPreviewVisible(true);
+        setSettlementPreviewOrder(order ?? null);
+        setSettlementPreviewLoading(false);
+        setSettlementPreviewError("");
+        setSettlementPreviewData(null);
+        setSettlementPreviewHomeScore("");
+        setSettlementPreviewAwayScore("");
+    }, []);
+
+    const submitSettlementPreview = useCallback(async () => {
+        const orderKey = String(settlementPreviewOrder?.orderId || settlementPreviewOrder?.contact || "").trim();
+        if (!orderKey) {
+            setSettlementPreviewError("该订单没有可用于预结算的订单号");
+            return;
+        }
+        if (settlementPreviewHomeScore === "" || settlementPreviewAwayScore === "") {
+            setSettlementPreviewError("请输入最终比分");
+            return;
+        }
+        setSettlementPreviewLoading(true);
+        setSettlementPreviewError("");
+        try {
+            const res = await previewOrderSettlement({
+                baseUrl,
+                orderId: orderKey,
+                homeScore: Number(settlementPreviewHomeScore),
+                awayScore: Number(settlementPreviewAwayScore),
+            });
+            const payload = res?.data?.data ?? res?.data ?? null;
+            setSettlementPreviewData(payload);
+            if (res?.data?.code != null && String(res.data.code) !== "0") {
+                setSettlementPreviewError(res?.data?.msg || "预结算失败");
+            }
+        } catch (err) {
+            setSettlementPreviewError(err?.message || "预结算失败");
+            setSettlementPreviewData(null);
+        } finally {
+            setSettlementPreviewLoading(false);
+        }
+    }, [baseUrl, settlementPreviewAwayScore, settlementPreviewHomeScore, settlementPreviewOrder]);
 
     const switchTransferSides = useCallback(() => {
         setTransferSwapSides((prev) => !prev);
@@ -4712,6 +4772,278 @@ export default function SoccerEarlyMarketPage() {
                 </div>
             )}
 
+            {settlementPreviewVisible && (
+                <div
+                    role="presentation"
+                    onClick={closeSettlementPreviewModal}
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        background: "rgba(15, 23, 42, 0.52)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        zIndex: 2200,
+                        padding: 16,
+                    }}
+                >
+                    <div
+                        role="presentation"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            width: "min(860px, 100%)",
+                            maxHeight: "88vh",
+                            overflow: "hidden",
+                            background: "#ffffff",
+                            color: "#111827",
+                            borderRadius: 18,
+                            padding: 18,
+                            boxShadow: "0 24px 80px rgba(15, 23, 42, 0.35)",
+                            border: "1px solid rgba(148, 163, 184, 0.18)",
+                            display: "flex",
+                            flexDirection: "column",
+                        }}
+                    >
+                        {(() => {
+                            const targetOrder = settlementPreviewOrder || {};
+                            const displayOrderId = targetOrder?.orderId || targetOrder?.contact || "-";
+                            const contactRows = Array.isArray(targetOrder?.contactVO) && targetOrder.contactVO.length > 0
+                                ? targetOrder.contactVO
+                                : [targetOrder];
+                            const firstRow = contactRows[0] || {};
+                            const homeName = firstRow?.event?.homeNameCN || firstRow?.homeNameCN || targetOrder?.homeNameCN || targetOrder?.homeName || "-";
+                            const awayName = firstRow?.event?.awayNameCN || firstRow?.awayNameCN || targetOrder?.awayNameCN || targetOrder?.awayName || "-";
+                            const previewItems = Array.isArray(settlementPreviewData?.items) ? settlementPreviewData.items : [];
+                            const aggregateOutcome = settlementPreviewData?.aggregateOutcome || "";
+                            const aggregateOutcomeLabel = settlementPreviewData?.aggregateOutcomeLabel || "";
+                            const aggregateColor = aggregateOutcome === "WIN" ? "#059669"
+                                : aggregateOutcome === "LOSS" ? "#dc2626"
+                                    : aggregateOutcome === "PUSH" ? "#6b7280"
+                                        : aggregateOutcome === "HALF_WIN" ? "#2563eb"
+                                            : aggregateOutcome === "HALF_LOSS" ? "#ea580c"
+                                                : "#7c3aed";
+                            return (
+                                <>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                                        <div>
+                                            <div style={{ fontSize: 18, fontWeight: 700 }}>结算验证</div>
+                                            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                                                订单号: {displayOrderId} · {homeName} VS {awayName}
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={closeSettlementPreviewModal}
+                                            style={{
+                                                border: "none",
+                                                background: "transparent",
+                                                color: "#111827",
+                                                fontSize: 22,
+                                                cursor: "pointer",
+                                                lineHeight: 1,
+                                            }}
+                                        >
+                                            ×
+                                        </button>
+                                    </div>
+
+                                    <div style={{ flex: 1, overflow: "auto", paddingRight: 4 }}>
+                                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginBottom: 12 }}>
+                                            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+                                                <div style={{ fontSize: 12, color: "#6b7280" }}>主队最终比分</div>
+                                                <input
+                                                    value={settlementPreviewHomeScore}
+                                                    onChange={(e) => setSettlementPreviewHomeScore(e.target.value.replace(/[^\d]/g, ""))}
+                                                    placeholder="例如 2"
+                                                    style={{ width: "100%", marginTop: 8, height: 38, borderRadius: 10, border: "1px solid #d1d5db", padding: "0 12px", fontSize: 14 }}
+                                                />
+                                            </div>
+                                            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+                                                <div style={{ fontSize: 12, color: "#6b7280" }}>客队最终比分</div>
+                                                <input
+                                                    value={settlementPreviewAwayScore}
+                                                    onChange={(e) => setSettlementPreviewAwayScore(e.target.value.replace(/[^\d]/g, ""))}
+                                                    placeholder="例如 1"
+                                                    style={{ width: "100%", marginTop: 8, height: 38, borderRadius: 10, border: "1px solid #d1d5db", padding: "0 12px", fontSize: 14 }}
+                                                />
+                                            </div>
+                                            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                                                <div style={{ fontSize: 12, color: "#6b7280" }}>操作</div>
+                                                <button
+                                                    type="button"
+                                                    onClick={submitSettlementPreview}
+                                                    disabled={settlementPreviewLoading}
+                                                    style={{
+                                                        marginTop: 8,
+                                                        height: 38,
+                                                        borderRadius: 10,
+                                                        border: "1px solid #c7d2fe",
+                                                        background: settlementPreviewLoading ? "#e5e7eb" : "#eef2ff",
+                                                        color: settlementPreviewLoading ? "#6b7280" : "#4338ca",
+                                                        fontWeight: 700,
+                                                        cursor: settlementPreviewLoading ? "default" : "pointer",
+                                                    }}
+                                                >
+                                                    {settlementPreviewLoading ? "验证中..." : "开始验证"}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {settlementPreviewError ? (
+                                            <div style={{ padding: 12, border: "1px solid #fecaca", borderRadius: 12, color: "#b91c1c", background: "#fef2f2", marginBottom: 12 }}>
+                                                {settlementPreviewError}
+                                            </div>
+                                        ) : null}
+
+                                        {settlementPreviewData ? (
+                                            <>
+                                                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginBottom: 12 }}>
+                                                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+                                                        <div style={{ fontSize: 12, color: "#6b7280" }}>预结算比分</div>
+                                                        <div style={{ marginTop: 6, fontWeight: 700 }}>{settlementPreviewData?.settlementScore || "-"}</div>
+                                                    </div>
+                                                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+                                                        <div style={{ fontSize: 12, color: "#6b7280" }}>预结算结果</div>
+                                                        <div style={{ marginTop: 6, fontWeight: 700, color: aggregateColor }}>{aggregateOutcomeLabel || "-"}</div>
+                                                    </div>
+                                                    <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+                                                        <div style={{ fontSize: 12, color: "#6b7280" }}>说明</div>
+                                                        <div style={{ marginTop: 6, fontWeight: 600, color: "#374151" }}>{settlementPreviewData?.message || "-"}</div>
+                                                    </div>
+                                                </div>
+
+                                                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                                                    {previewItems.map((item, idx) => {
+                                                        const itemOutcome = String(item?.outcome || "");
+                                                        const validation = item?.validation || {};
+                                                        const validationPassed = !!validation?.passed;
+                                                        const itemColor = itemOutcome === "WIN" ? "#059669"
+                                                            : itemOutcome === "LOSS" ? "#dc2626"
+                                                                : itemOutcome === "PUSH" ? "#6b7280"
+                                                                    : itemOutcome === "HALF_WIN" ? "#2563eb"
+                                                                        : itemOutcome === "HALF_LOSS" ? "#ea580c"
+                                                                            : "#7c3aed";
+                                                        return (
+                                                            <div key={`${item?.orderId || item?.oddingId || idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fff" }}>
+                                                                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+                                                                    <div>
+                                                                        <div style={{ fontWeight: 700 }}>
+                                                                            {(item?.homeNameCn || "-")} VS {(item?.awayNameCn || "-")}
+                                                                        </div>
+                                                                        <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
+                                                                            {(item?.betPlayName || "").replace(/_/g, " ")}{item?.teamType ? ` ${item.teamType}` : ""}{item?.handicap ? ` · 盘口 ${item.handicap}` : ""}{item?.odds != null ? ` @${item.odds}` : ""}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div style={{ textAlign: "right" }}>
+                                                                        <div style={{ fontWeight: 700, color: itemColor }}>{item?.outcomeLabel || "-"}</div>
+                                                                        <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
+                                                                            预结算金额: {item?.settlementAmount != null ? item.settlementAmount : "-"}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, fontSize: 12 }}>
+                                                                    <div style={{ padding: "8px 10px", borderRadius: 8, background: "#f9fafb", border: "1px solid #e5e7eb" }}>
+                                                                        <div style={{ color: "#6b7280" }}>订单号</div>
+                                                                        <div style={{ marginTop: 4, fontWeight: 600 }}>{item?.orderId || item?.contact || "-"}</div>
+                                                                    </div>
+                                                                    <div style={{ padding: "8px 10px", borderRadius: 8, background: "#f9fafb", border: "1px solid #e5e7eb" }}>
+                                                                        <div style={{ color: "#6b7280" }}>detailResult</div>
+                                                                        <div style={{ marginTop: 4, fontWeight: 600 }}>{item?.detailResult || "-"}</div>
+                                                                    </div>
+                                                                    <div style={{ padding: "8px 10px", borderRadius: 8, background: "#f9fafb", border: "1px solid #e5e7eb" }}>
+                                                                        <div style={{ color: "#6b7280" }}>赔率 / 金额</div>
+                                                                        <div style={{ marginTop: 4, fontWeight: 600 }}>{item?.betAmount ?? "-"} @ {item?.odds ?? "-"}</div>
+                                                                    </div>
+                                                                </div>
+                                                                <div style={{ marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: validationPassed ? "#f0fdf4" : "#fff7ed" }}>
+                                                                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                                                                        <div style={{ fontSize: 12, fontWeight: 700, color: validationPassed ? "#166534" : "#9a3412" }}>
+                                                                            快照校验: {validationPassed ? "通过" : "不通过"}
+                                                                        </div>
+                                                                        <div style={{ fontSize: 12, color: "#6b7280" }}>
+                                                                            {validation?.snapshotSource || "-"} / {validation?.snapshotType || "-"}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, fontSize: 12 }}>
+                                                                        <div style={{ padding: "8px 10px", borderRadius: 8, background: "#fff", border: "1px solid #e5e7eb" }}>
+                                                                            <div style={{ color: "#6b7280" }}>下注比分</div>
+                                                                            <div style={{ marginTop: 4, fontWeight: 600 }}>{validation?.requestScore || "-"}</div>
+                                                                        </div>
+                                                                        <div style={{ padding: "8px 10px", borderRadius: 8, background: "#fff", border: "1px solid #e5e7eb" }}>
+                                                                            <div style={{ color: "#6b7280" }}>快照比分</div>
+                                                                            <div style={{ marginTop: 4, fontWeight: 600 }}>{validation?.snapshotScore || "-"}</div>
+                                                                        </div>
+                                                                        <div style={{ padding: "8px 10px", borderRadius: 8, background: "#fff", border: "1px solid #e5e7eb" }}>
+                                                                            <div style={{ color: "#6b7280" }}>下注赔率</div>
+                                                                            <div style={{ marginTop: 4, fontWeight: 600 }}>{validation?.requestOdds ?? "-"}</div>
+                                                                        </div>
+                                                                        <div style={{ padding: "8px 10px", borderRadius: 8, background: "#fff", border: "1px solid #e5e7eb" }}>
+                                                                            <div style={{ color: "#6b7280" }}>快照赔率</div>
+                                                                            <div style={{ marginTop: 4, fontWeight: 600 }}>{validation?.snapshotOdds ?? "-"}</div>
+                                                                        </div>
+                                                                        <div style={{ padding: "8px 10px", borderRadius: 8, background: "#fff", border: "1px solid #e5e7eb" }}>
+                                                                            <div style={{ color: "#6b7280" }}>下注盘口</div>
+                                                                            <div style={{ marginTop: 4, fontWeight: 600 }}>{validation?.requestHandicap || "-"}</div>
+                                                                        </div>
+                                                                        <div style={{ padding: "8px 10px", borderRadius: 8, background: "#fff", border: "1px solid #e5e7eb" }}>
+                                                                            <div style={{ color: "#6b7280" }}>快照盘口</div>
+                                                                            <div style={{ marginTop: 4, fontWeight: 600 }}>{validation?.snapshotHandicap || "-"}</div>
+                                                                        </div>
+                                                                        <div style={{ padding: "8px 10px", borderRadius: 8, background: "#fff", border: "1px solid #e5e7eb" }}>
+                                                                            <div style={{ color: "#6b7280" }}>赔率一致</div>
+                                                                            <div style={{ marginTop: 4, fontWeight: 600 }}>{validation?.oddsMatched ? "是" : "否"}</div>
+                                                                        </div>
+                                                                        <div style={{ padding: "8px 10px", borderRadius: 8, background: "#fff", border: "1px solid #e5e7eb" }}>
+                                                                            <div style={{ color: "#6b7280" }}>比分一致</div>
+                                                                            <div style={{ marginTop: 4, fontWeight: 600 }}>{validation?.scoreMatched ? "是" : "否"}</div>
+                                                                        </div>
+                                                                    </div>
+                                                                    {validation?.message ? (
+                                                                        <div style={{ marginTop: 8, fontSize: 12, color: validationPassed ? "#166534" : "#9a3412" }}>
+                                                                            {validation.message}
+                                                                        </div>
+                                                                    ) : null}
+                                                                </div>
+                                                                {item?.message ? (
+                                                                    <div style={{ marginTop: 8, fontSize: 12, color: "#7c2d12" }}>{item.message}</div>
+                                                                ) : null}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <div style={{ color: "#9ca3af", textAlign: "center", padding: 24 }}>
+                                                输入最终比分后，可以直接模拟结算模块返回输赢平结果。
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                                        <button
+                                            type="button"
+                                            onClick={closeSettlementPreviewModal}
+                                            style={{
+                                                height: 36,
+                                                padding: "0 16px",
+                                                borderRadius: 999,
+                                                border: "1px solid #d1d5db",
+                                                background: "#fff",
+                                                color: "#374151",
+                                                cursor: "pointer",
+                                                fontWeight: 600,
+                                                fontSize: 12,
+                                            }}
+                                        >
+                                            关闭
+                                        </button>
+                                    </div>
+                                </>
+                            );
+                        })()}
+                    </div>
+                </div>
+            )}
+
                 {/* 下方：订单列表 + 结算汇总 */}
                 <div style={{ flexShrink: 0, marginTop: 12, display: "flex", flexDirection: "column", gap: 12 }}>
                     <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
@@ -4803,6 +5135,21 @@ export default function SoccerEarlyMarketPage() {
                                                     }}
                                                 >
                                                     比赛结果
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openSettlementPreviewModal(order)}
+                                                    style={{
+                                                        padding: "4px 10px",
+                                                        fontSize: 12,
+                                                        border: "1px solid #c7d2fe",
+                                                        borderRadius: 999,
+                                                        background: "#eef2ff",
+                                                        cursor: "pointer",
+                                                        color: "#4338ca",
+                                                    }}
+                                                >
+                                                    结算验证
                                                 </button>
                                             </span>
                                         </div>
