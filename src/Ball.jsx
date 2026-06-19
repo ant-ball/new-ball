@@ -13,6 +13,8 @@ import {
     queryTransferWalletBalance,
     submitTransfer,
     getMatchResult,
+    startAutoBet,
+    getAutoBetTask,
 } from "./api";
 import { useOddsSocket } from "./useOddsSocket";
 import { getBallApiBaseUrl } from "./config";
@@ -772,6 +774,11 @@ function getMatchTime(match) {
     });
 }
 
+function getAutoBetMatchEventId(match) {
+    if (!match) return "";
+    return String(match.id ?? match.bet365Id ?? "");
+}
+
 function formatBalanceBillTime(createdTime) {
     if (createdTime == null || createdTime === "") return "-";
     const raw = Number(createdTime);
@@ -1497,6 +1504,14 @@ export default function SoccerEarlyMarketPage() {
     const [billHasNext, setBillHasNext] = useState(false);
     const [billCursor, setBillCursor] = useState(null);
     const [billError, setBillError] = useState("");
+    const [autoBetVisible, setAutoBetVisible] = useState(false);
+    const [autoBetWindowMinutes, setAutoBetWindowMinutes] = useState(5);
+    const [autoBetStartingEventId, setAutoBetStartingEventId] = useState("");
+    const [autoBetError, setAutoBetError] = useState("");
+    const [autoBetTaskId, setAutoBetTaskId] = useState("");
+    const [autoBetTaskData, setAutoBetTaskData] = useState(null);
+    const [autoBetSelectedMatch, setAutoBetSelectedMatch] = useState(null);
+    const autoBetPollTimerRef = useRef(null);
     const slipKeyRef = useRef(0);
 
     /** 玩法集合：type=1 早盘 type=5 滚球 type=6 其他；按 type -> smallId -> { betName, samllName, smallId } */
@@ -2243,6 +2258,19 @@ export default function SoccerEarlyMarketPage() {
         setBillError("");
     }, []);
 
+    const closeAutoBetModal = useCallback(() => {
+        setAutoBetVisible(false);
+        setAutoBetError("");
+        setAutoBetTaskId("");
+        setAutoBetTaskData(null);
+        setAutoBetSelectedMatch(null);
+        setAutoBetStartingEventId("");
+        if (autoBetPollTimerRef.current) {
+            clearInterval(autoBetPollTimerRef.current);
+            autoBetPollTimerRef.current = null;
+        }
+    }, []);
+
     const closeOrderResultModal = useCallback(() => {
         setOrderResultVisible(false);
         setOrderResultLoading(false);
@@ -2280,6 +2308,90 @@ export default function SoccerEarlyMarketPage() {
         setTransferSwapSides((prev) => !prev);
         setTransferError("");
     }, []);
+
+    const handleStartAutoBet = useCallback(async (match) => {
+        const eventId = getAutoBetMatchEventId(match);
+        if (!eventId) {
+            setAutoBetVisible(true);
+            setAutoBetError("当前比赛缺少 eventId，无法启动自动下注");
+            return;
+        }
+
+        const sameTaskRunning = autoBetTaskId
+            && String(autoBetTaskData?.eventId ?? autoBetTaskData?.bet365Id ?? "") === eventId
+            && Boolean(autoBetTaskData?.running);
+        if (sameTaskRunning) {
+            setAutoBetVisible(true);
+            setAutoBetError("");
+            return;
+        }
+
+        setAutoBetVisible(true);
+        setAutoBetError("");
+        setAutoBetTaskId("");
+        setAutoBetTaskData(null);
+        setAutoBetSelectedMatch({
+            eventId,
+            bet365Id: String(match?.bet365Id ?? match?.id ?? ""),
+            homeName: getDisplayHomeName(match),
+            awayName: getDisplayAwayName(match),
+            score: getScore(match),
+            time: getMatchTime(match),
+        });
+        setAutoBetStartingEventId(eventId);
+
+        try {
+            const res = await startAutoBet({
+                baseUrl,
+                eventId,
+                windowMinutes: autoBetWindowMinutes,
+            });
+            const task = res?.data?.data ?? res?.data ?? null;
+            const taskId = task?.taskId != null ? String(task.taskId) : "";
+            setAutoBetTaskData(task);
+            setAutoBetTaskId(taskId);
+            if (!taskId) {
+                setAutoBetError("任务已启动，但未返回 taskId");
+            }
+        } catch (err) {
+            setAutoBetError(err?.message || "启动自动下注失败");
+        } finally {
+            setAutoBetStartingEventId("");
+        }
+    }, [autoBetTaskData?.bet365Id, autoBetTaskData?.eventId, autoBetTaskData?.running, autoBetTaskId, autoBetWindowMinutes, baseUrl]);
+
+    useEffect(() => {
+        if (!autoBetTaskId) return undefined;
+
+        let cancelled = false;
+        const pollTask = async () => {
+            try {
+                const res = await getAutoBetTask({ baseUrl, taskId: autoBetTaskId });
+                if (cancelled) return;
+                const task = res?.data?.data ?? res?.data ?? null;
+                setAutoBetTaskData(task);
+                setAutoBetError("");
+                if (!task?.running && autoBetPollTimerRef.current) {
+                    clearInterval(autoBetPollTimerRef.current);
+                    autoBetPollTimerRef.current = null;
+                }
+            } catch (err) {
+                if (cancelled) return;
+                setAutoBetError(err?.message || "查询自动下注任务失败");
+            }
+        };
+
+        pollTask();
+        autoBetPollTimerRef.current = setInterval(pollTask, 2000);
+
+        return () => {
+            cancelled = true;
+            if (autoBetPollTimerRef.current) {
+                clearInterval(autoBetPollTimerRef.current);
+                autoBetPollTimerRef.current = null;
+            }
+        };
+    }, [autoBetTaskId, baseUrl]);
 
     const handleTransferFromChange = useCallback((walletType) => {
         setTransferFromWalletType(walletType);
@@ -2837,6 +2949,10 @@ export default function SoccerEarlyMarketPage() {
                                         const matchCardKey = getMatchKey(match, index);
                                         const isTimeDebugOpen = timeDebugMatchKey === matchCardKey;
                                         const timeDebugGroups = isTimeDebugOpen ? buildTimeDebugGroups(match) : [];
+                                        const autoBetMatchEventId = getAutoBetMatchEventId(match);
+                                        const isAutoBetStarting = autoBetStartingEventId === autoBetMatchEventId;
+                                        const isCurrentAutoBetTask = autoBetTaskId
+                                            && String(autoBetTaskData?.eventId ?? autoBetTaskData?.bet365Id ?? "") === autoBetMatchEventId;
                                         return (
                                         <div
                                             key={matchCardKey}
@@ -2878,6 +2994,34 @@ export default function SoccerEarlyMarketPage() {
                                                     )}
                                                 </div>
                                                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (isCurrentAutoBetTask) {
+                                                                setAutoBetVisible(true);
+                                                                return;
+                                                            }
+                                                            handleStartAutoBet(match);
+                                                        }}
+                                                        disabled={isAutoBetStarting}
+                                                        style={{
+                                                            fontSize: 11,
+                                                            fontWeight: 700,
+                                                            color: "#065f46",
+                                                            background: "#ecfdf5",
+                                                            border: "1px solid #a7f3d0",
+                                                            borderRadius: 8,
+                                                            padding: "6px 10px",
+                                                            cursor: isAutoBetStarting ? "not-allowed" : "pointer",
+                                                            opacity: isAutoBetStarting ? 0.65 : 1,
+                                                        }}
+                                                    >
+                                                        {isAutoBetStarting
+                                                            ? "启动中..."
+                                                            : isCurrentAutoBetTask
+                                                                ? (autoBetTaskData?.running ? "查看自动下注" : "查看记录")
+                                                                : "自动下注"}
+                                                    </button>
                                                     <button
                                                         type="button"
                                                         onClick={() => setTimeDebugMatchKey((current) => current === matchCardKey ? "" : matchCardKey)}
@@ -3338,6 +3482,165 @@ export default function SoccerEarlyMarketPage() {
                         )}
                 </div>
             </div>
+
+            {autoBetVisible && (
+                <div
+                    role="presentation"
+                    onClick={closeAutoBetModal}
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        background: "rgba(15, 23, 42, 0.55)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        zIndex: 1900,
+                        padding: 16,
+                    }}
+                >
+                    <div
+                        role="presentation"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            width: "min(980px, 100%)",
+                            maxHeight: "88vh",
+                            overflow: "hidden",
+                            background: "#ffffff",
+                            color: "#111827",
+                            borderRadius: 18,
+                            padding: 18,
+                            boxShadow: "0 24px 80px rgba(15, 23, 42, 0.35)",
+                            border: "1px solid rgba(148, 163, 184, 0.18)",
+                            display: "flex",
+                            flexDirection: "column",
+                        }}
+                    >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                            <div>
+                                <div style={{ fontSize: 18, fontWeight: 700 }}>自动下注 Console</div>
+                                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                                    {autoBetSelectedMatch?.homeName || "-"} VS {autoBetSelectedMatch?.awayName || "-"}
+                                    {autoBetSelectedMatch?.score ? ` · ${autoBetSelectedMatch.score}` : ""}
+                                    {autoBetSelectedMatch?.time ? ` · ${autoBetSelectedMatch.time}` : ""}
+                                </div>
+                            </div>
+                            <button
+                                onClick={closeAutoBetModal}
+                                style={{
+                                    border: "none",
+                                    background: "transparent",
+                                    color: "#111827",
+                                    fontSize: 22,
+                                    cursor: "pointer",
+                                    lineHeight: 1,
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 12, alignItems: "end", marginBottom: 14 }}>
+                            <div>
+                                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>时间窗口（分钟）</div>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    value={autoBetWindowMinutes}
+                                    onChange={(e) => setAutoBetWindowMinutes(Math.max(1, Number(e.target.value || 5)))}
+                                    style={{
+                                        width: "100%",
+                                        height: 40,
+                                        borderRadius: 10,
+                                        border: "1px solid #d1d5db",
+                                        padding: "0 12px",
+                                        outline: "none",
+                                    }}
+                                />
+                            </div>
+                            <div style={{ fontSize: 12, color: "#6b7280", display: "flex", gap: 16, flexWrap: "wrap" }}>
+                                <span>taskId: <strong style={{ color: "#111827" }}>{autoBetTaskData?.taskId || "-"}</strong></span>
+                                <span>状态: <strong style={{ color: autoBetTaskData?.running ? "#059669" : "#111827" }}>{autoBetTaskData?.status || "-"}</strong></span>
+                                <span>成功: <strong style={{ color: "#059669" }}>{autoBetTaskData?.successCount ?? 0}</strong></span>
+                                <span>失败: <strong style={{ color: "#dc2626" }}>{autoBetTaskData?.failureCount ?? 0}</strong></span>
+                            </div>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginBottom: 12 }}>
+                            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                                <div style={{ fontSize: 11, color: "#6b7280" }}>开始时间</div>
+                                <div style={{ marginTop: 6, fontWeight: 700 }}>{formatTimelineTime(autoBetTaskData?.startedAt)}</div>
+                            </div>
+                            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                                <div style={{ fontSize: 11, color: "#6b7280" }}>到期时间</div>
+                                <div style={{ marginTop: 6, fontWeight: 700 }}>{formatTimelineTime(autoBetTaskData?.expiresAt)}</div>
+                            </div>
+                            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                                <div style={{ fontSize: 11, color: "#6b7280" }}>结束时间</div>
+                                <div style={{ marginTop: 6, fontWeight: 700 }}>{formatTimelineTime(autoBetTaskData?.finishedAt)}</div>
+                            </div>
+                            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 10 }}>
+                                <div style={{ fontSize: 11, color: "#6b7280" }}>结束原因</div>
+                                <div style={{ marginTop: 6, fontWeight: 700 }}>{autoBetTaskData?.finishDetail || "-"}</div>
+                            </div>
+                        </div>
+
+                        {autoBetError ? (
+                            <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 10, background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", fontSize: 13 }}>
+                                {autoBetError}
+                            </div>
+                        ) : null}
+
+                        <div style={{ flex: 1, overflow: "auto", border: "1px solid #e5e7eb", borderRadius: 12, background: "#f8fafc" }}>
+                            {!autoBetTaskData ? (
+                                <div style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>
+                                    {autoBetStartingEventId ? "正在启动任务..." : "请选择比赛并启动自动下注"}
+                                </div>
+                            ) : Array.isArray(autoBetTaskData?.attempts) && autoBetTaskData.attempts.length > 0 ? (
+                                <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                                    {autoBetTaskData.attempts.slice().reverse().map((attempt, index) => (
+                                        <div
+                                            key={`${attempt?.ts ?? "na"}_${attempt?.oddingId ?? attempt?.marketKey ?? index}`}
+                                            style={{
+                                                border: "1px solid #e5e7eb",
+                                                borderRadius: 12,
+                                                padding: 12,
+                                                background: "#fff",
+                                            }}
+                                        >
+                                            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
+                                                <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>
+                                                    {attempt?.betPlayName || attempt?.marketKey || "盘口尝试"}
+                                                </div>
+                                                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                                                    {formatTimelineTime(attempt?.ts)}
+                                                </div>
+                                            </div>
+                                            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, fontSize: 12, color: "#374151" }}>
+                                                <div>状态：<strong style={{ color: attempt?.status === "SUCCESS" ? "#059669" : attempt?.status === "REJECTED" || attempt?.status === "ERROR" || attempt?.status === "EXCEPTION" ? "#dc2626" : "#111827" }}>{attempt?.status || "-"}</strong></div>
+                                                <div>赔率：<strong>{attempt?.odds ?? "-"}</strong></div>
+                                                <div>盘口：<strong>{attempt?.handicap ?? "-"}</strong></div>
+                                                <div>oddingId：<strong>{attempt?.oddingId ?? "-"}</strong></div>
+                                                <div>eventId：<strong>{attempt?.eventId ?? "-"}</strong></div>
+                                                <div>bet365Id：<strong>{attempt?.bet365Id ?? "-"}</strong></div>
+                                                <div>玩法：<strong>{attempt?.oddsMarkets ?? "-"}</strong></div>
+                                                <div>订单：<strong>{attempt?.orderId ?? attempt?.externalOrderId ?? "-"}</strong></div>
+                                            </div>
+                                            <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                                {attempt?.detail || attempt?.serviceMsg || "-"}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>
+                                    当前任务还没有下注记录
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {transferVisible && (
                 <div
