@@ -915,7 +915,9 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
             handicap: currentItem?.handicap != null ? String(currentItem.handicap) : (slipItem.handicap ?? ""),
             teamType: buildCanonicalTeamType({
                 betPlayId: slipItem?.betPlayId,
-                rawSelection: currentItem?.team ?? currentItem?.header ?? currentItem?.name ?? currentItem?.handicap ?? "",
+                rawSelection: (String(slipItem?.betPlayId ?? "") === "43" || String(slipItem?.betPlayId ?? "") === "10001" || String(slipItem?.betPlayId ?? "") === "10540" || String(slipItem?.betPlayId ?? "") === "10561")
+                    ? (currentItem?.name ?? "")
+                    : (currentItem?.team ?? currentItem?.header ?? currentItem?.name ?? currentItem?.handicap ?? ""),
                 homeName: getHomeName(currentMatch),
                 awayName: getAwayName(currentMatch),
                 optionOrder: currentItem?.or ?? currentItem?.OR,
@@ -951,7 +953,9 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
         handicap: (currentPa?.ha ?? currentPa?.HA) != null ? String(currentPa?.ha ?? currentPa?.HA) : (slipItem.handicap ?? ""),
         teamType: buildCanonicalTeamType({
             betPlayId: slipItem?.betPlayId,
-            rawSelection: currentPa?.pNa ?? currentPa?.n2 ?? currentPa?.N2 ?? currentPa?.na ?? currentPa?.NA ?? selectionLabel,
+            rawSelection: (String(slipItem?.betPlayId ?? "") === "43" || String(slipItem?.betPlayId ?? "") === "10001" || String(slipItem?.betPlayId ?? "") === "10540" || String(slipItem?.betPlayId ?? "") === "10561")
+                ? (currentPa?.na ?? currentPa?.NA ?? "")
+                : (currentPa?.pNa ?? currentPa?.n2 ?? currentPa?.N2 ?? currentPa?.na ?? currentPa?.NA ?? selectionLabel),
             homeName: getHomeName(currentMatch),
             awayName: getAwayName(currentMatch),
             optionOrder: currentPa?.or ?? currentPa?.OR,
@@ -1923,7 +1927,9 @@ export default function SoccerEarlyMarketPage() {
                     timeStr,
                     teamType: buildCanonicalTeamType({
                         betPlayId,
-                        rawSelection: item.team ?? item.header ?? item.name ?? item.handicap ?? "",
+                        rawSelection: (betPlayId === "43" || betPlayId === "10001" || betPlayId === "10540" || betPlayId === "10561")
+                            ? (item?.name ?? "")
+                            : (item.team ?? item.header ?? item.name ?? item.handicap ?? ""),
                         homeName: getHomeName(match),
                         awayName: getAwayName(match),
                         correctScoreDirection,
@@ -1985,7 +1991,9 @@ export default function SoccerEarlyMarketPage() {
                     timeStr,
                     teamType: buildCanonicalTeamType({
                         betPlayId,
-                        rawSelection: pa?.pNa ?? pa?.n2 ?? pa?.N2 ?? pa?.na ?? pa?.NA ?? selectionLabel,
+                        rawSelection: (betPlayId === "43" || betPlayId === "10001" || betPlayId === "10540" || betPlayId === "10561")
+                            ? (pa?.na ?? pa?.NA ?? "")
+                            : (pa?.pNa ?? pa?.n2 ?? pa?.N2 ?? pa?.na ?? pa?.NA ?? selectionLabel),
                         homeName: getHomeName(match),
                         awayName: getAwayName(match),
                         optionOrder: pa?.or ?? pa?.OR,
@@ -2042,7 +2050,9 @@ export default function SoccerEarlyMarketPage() {
         const canonicalTeamType = item.type === "inplay"
             ? buildCanonicalTeamType({
                 betPlayId: item.betPlayId,
-                rawSelection: item?.pa?.pNa ?? item?.pa?.n2 ?? item?.pa?.N2 ?? item?.pa?.na ?? item?.pa?.NA ?? getInplaySelectionLabel(item?.pa),
+                rawSelection: (item.betPlayId === "43" || item.betPlayId === "10001" || item.betPlayId === "10540" || item.betPlayId === "10561")
+                    ? (item?.pa?.na ?? item?.pa?.NA ?? "")
+                    : (item?.pa?.pNa ?? item?.pa?.n2 ?? item?.pa?.N2 ?? item?.pa?.na ?? item?.pa?.NA ?? getInplaySelectionLabel(item?.pa)),
                 homeName: getHomeName(item?.match),
                 awayName: getAwayName(item?.match),
                 optionOrder: item?.pa?.or ?? item?.pa?.OR,
@@ -2050,7 +2060,9 @@ export default function SoccerEarlyMarketPage() {
             })
             : buildCanonicalTeamType({
                 betPlayId: item.betPlayId,
-                rawSelection: item?.item?.team ?? item?.item?.header ?? item?.item?.name ?? item?.item?.handicap ?? "",
+                rawSelection: (item.betPlayId === "43" || item.betPlayId === "10001" || item.betPlayId === "10540" || item.betPlayId === "10561")
+                    ? (item?.item?.name ?? "")
+                    : (item?.item?.team ?? item?.item?.header ?? item?.item?.name ?? item?.item?.handicap ?? ""),
                 homeName: getHomeName(item?.match),
                 awayName: getAwayName(item?.match),
                 optionOrder: item?.item?.or ?? item?.item?.OR,
