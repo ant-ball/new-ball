@@ -1524,8 +1524,11 @@ export default function SoccerEarlyMarketPage() {
         if (autoBetAttemptFilter === "success") {
             return attempts.filter((attempt) => attempt?.status === "SUCCESS");
         }
+        if (autoBetAttemptFilter === "newoddsRejected") {
+            return attempts.filter((attempt) => String(attempt?.status || "").toUpperCase() === "SKIPPED");
+        }
         if (autoBetAttemptFilter === "failure") {
-            return attempts.filter((attempt) => ["REJECTED", "ERROR", "EXCEPTION"].includes(String(attempt?.status || "").toUpperCase()));
+            return attempts.filter((attempt) => ["REJECTED", "ERROR", "EXCEPTION", "EXTERNAL_FAILED", "INSERT_FAILED"].includes(String(attempt?.status || "").toUpperCase()));
         }
         return attempts;
     }, [autoBetAttemptFilter, autoBetTaskData?.attempts]);
@@ -3703,6 +3706,7 @@ export default function SoccerEarlyMarketPage() {
                                 { key: "all", label: `全部 ${Array.isArray(autoBetTaskData?.attempts) ? autoBetTaskData.attempts.length : 0}` },
                                 { key: "success", label: `成功 ${autoBetTaskData?.successCount ?? 0}` },
                                 { key: "failure", label: `失败 ${autoBetTaskData?.failureCount ?? 0}` },
+                                { key: "newoddsRejected", label: `newodds拒绝 ${autoBetTaskData?.skippedCount ?? 0}` },
                             ].map((item) => {
                                 const active = autoBetAttemptFilter === item.key;
                                 return (
@@ -3754,7 +3758,7 @@ export default function SoccerEarlyMarketPage() {
                                                 </div>
                                             </div>
                                             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, fontSize: 12, color: "#374151" }}>
-                                                <div>状态：<strong style={{ color: attempt?.status === "SUCCESS" ? "#059669" : attempt?.status === "REJECTED" || attempt?.status === "ERROR" || attempt?.status === "EXCEPTION" ? "#dc2626" : "#111827" }}>{attempt?.status || "-"}</strong></div>
+                                                <div>状态：<strong style={{ color: attempt?.status === "SUCCESS" ? "#059669" : attempt?.status === "SKIPPED" ? "#d97706" : attempt?.status === "REJECTED" || attempt?.status === "ERROR" || attempt?.status === "EXCEPTION" || attempt?.status === "EXTERNAL_FAILED" || attempt?.status === "INSERT_FAILED" ? "#dc2626" : "#111827" }}>{attempt?.status || "-"}</strong></div>
                                                 <div>赔率：<strong>{attempt?.odds ?? "-"}</strong></div>
                                                 <div>盘口：<strong>{attempt?.handicap ?? "-"}</strong></div>
                                                 <div>oddingId：<strong>{attempt?.oddingId ?? "-"}</strong></div>
