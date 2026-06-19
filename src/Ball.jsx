@@ -15,6 +15,7 @@ import {
     getMatchResult,
     startAutoBet,
     getAutoBetTask,
+    stopAutoBet,
 } from "./api";
 import { useOddsSocket } from "./useOddsSocket";
 import { getBallApiBaseUrl } from "./config";
@@ -2294,6 +2295,33 @@ export default function SoccerEarlyMarketPage() {
         }
     }, []);
 
+    const openAutoBetModal = useCallback((match) => {
+        const eventId = getAutoBetMatchEventId(match);
+        setAutoBetVisible(true);
+        setAutoBetError(eventId ? "" : "当前比赛缺少 eventId，无法启动自动下注");
+        setAutoBetAttemptFilter("all");
+        setAutoBetSelectedMatch({
+            eventId,
+            bet365Id: String(match?.bet365Id ?? match?.id ?? ""),
+            homeName: getDisplayHomeName(match),
+            awayName: getDisplayAwayName(match),
+            score: getScore(match),
+            time: getMatchTime(match),
+        });
+        const isCurrentTask = autoBetTaskId
+            && eventId
+            && String(autoBetTaskData?.eventId ?? autoBetTaskData?.bet365Id ?? "") === eventId;
+        if (!isCurrentTask) {
+            setAutoBetTaskId("");
+            setAutoBetTaskData(null);
+            setAutoBetStartingEventId("");
+            if (autoBetPollTimerRef.current) {
+                clearInterval(autoBetPollTimerRef.current);
+                autoBetPollTimerRef.current = null;
+            }
+        }
+    }, [autoBetTaskData?.bet365Id, autoBetTaskData?.eventId, autoBetTaskId]);
+
     const closeOrderResultModal = useCallback(() => {
         setOrderResultVisible(false);
         setOrderResultLoading(false);
@@ -2333,7 +2361,8 @@ export default function SoccerEarlyMarketPage() {
     }, []);
 
     const handleStartAutoBet = useCallback(async (match) => {
-        const eventId = getAutoBetMatchEventId(match);
+        const sourceMatch = match || autoBetSelectedMatch;
+        const eventId = getAutoBetMatchEventId(sourceMatch) || String(sourceMatch?.eventId ?? "");
         if (!eventId) {
             setAutoBetVisible(true);
             setAutoBetError("当前比赛缺少 eventId，无法启动自动下注");
@@ -2355,11 +2384,11 @@ export default function SoccerEarlyMarketPage() {
         setAutoBetTaskData(null);
         setAutoBetSelectedMatch({
             eventId,
-            bet365Id: String(match?.bet365Id ?? match?.id ?? ""),
-            homeName: getDisplayHomeName(match),
-            awayName: getDisplayAwayName(match),
-            score: getScore(match),
-            time: getMatchTime(match),
+            bet365Id: String(sourceMatch?.bet365Id ?? sourceMatch?.id ?? ""),
+            homeName: sourceMatch?.homeName || getDisplayHomeName(sourceMatch),
+            awayName: sourceMatch?.awayName || getDisplayAwayName(sourceMatch),
+            score: sourceMatch?.score || getScore(sourceMatch),
+            time: sourceMatch?.time || getMatchTime(sourceMatch),
         });
         setAutoBetStartingEventId(eventId);
 
@@ -2381,7 +2410,26 @@ export default function SoccerEarlyMarketPage() {
         } finally {
             setAutoBetStartingEventId("");
         }
-    }, [autoBetTaskData?.bet365Id, autoBetTaskData?.eventId, autoBetTaskData?.running, autoBetTaskId, autoBetWindowMinutes, baseUrl]);
+    }, [autoBetSelectedMatch, autoBetTaskData?.bet365Id, autoBetTaskData?.eventId, autoBetTaskData?.running, autoBetTaskId, autoBetWindowMinutes, baseUrl]);
+
+    const handleStopAutoBet = useCallback(async () => {
+        if (!autoBetTaskId) {
+            setAutoBetError("当前没有可停止的任务");
+            return;
+        }
+        try {
+            setAutoBetError("");
+            const res = await stopAutoBet({ baseUrl, taskId: autoBetTaskId });
+            const task = res?.data?.data ?? res?.data ?? null;
+            setAutoBetTaskData(task);
+            if (!task?.running && autoBetPollTimerRef.current) {
+                clearInterval(autoBetPollTimerRef.current);
+                autoBetPollTimerRef.current = null;
+            }
+        } catch (err) {
+            setAutoBetError(err?.message || "停止自动下注失败");
+        }
+    }, [autoBetTaskId, baseUrl]);
 
     useEffect(() => {
         if (!autoBetTaskId) return undefined;
@@ -3019,13 +3067,7 @@ export default function SoccerEarlyMarketPage() {
                                                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                                                     <button
                                                         type="button"
-                                                        onClick={() => {
-                                                            if (isCurrentAutoBetTask) {
-                                                                setAutoBetVisible(true);
-                                                                return;
-                                                            }
-                                                            handleStartAutoBet(match);
-                                                        }}
+                                                        onClick={() => openAutoBetModal(match)}
                                                         disabled={isAutoBetStarting}
                                                         style={{
                                                             fontSize: 11,
@@ -3581,11 +3623,53 @@ export default function SoccerEarlyMarketPage() {
                                     }}
                                 />
                             </div>
-                            <div style={{ fontSize: 12, color: "#6b7280", display: "flex", gap: 16, flexWrap: "wrap" }}>
-                                <span>taskId: <strong style={{ color: "#111827" }}>{autoBetTaskData?.taskId || "-"}</strong></span>
-                                <span>状态: <strong style={{ color: autoBetTaskData?.running ? "#059669" : "#111827" }}>{autoBetTaskData?.status || "-"}</strong></span>
-                                <span>成功: <strong style={{ color: "#059669" }}>{autoBetTaskData?.successCount ?? 0}</strong></span>
-                                <span>失败: <strong style={{ color: "#dc2626" }}>{autoBetTaskData?.failureCount ?? 0}</strong></span>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+                                <div style={{ fontSize: 12, color: "#6b7280", display: "flex", gap: 16, flexWrap: "wrap" }}>
+                                    <span>taskId: <strong style={{ color: "#111827" }}>{autoBetTaskData?.taskId || "-"}</strong></span>
+                                    <span>状态: <strong style={{ color: autoBetTaskData?.running ? "#059669" : "#111827" }}>{autoBetTaskData?.status || "-"}</strong></span>
+                                    <span>成功: <strong style={{ color: "#059669" }}>{autoBetTaskData?.successCount ?? 0}</strong></span>
+                                    <span>失败: <strong style={{ color: "#dc2626" }}>{autoBetTaskData?.failureCount ?? 0}</strong></span>
+                                </div>
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleStartAutoBet()}
+                                        disabled={autoBetStartingEventId === String(autoBetSelectedMatch?.eventId ?? "") || Boolean(autoBetTaskData?.running) || !autoBetSelectedMatch?.eventId}
+                                        style={{
+                                            height: 36,
+                                            padding: "0 14px",
+                                            borderRadius: 10,
+                                            border: "1px solid #86efac",
+                                            background: "#ecfdf5",
+                                            color: "#166534",
+                                            fontSize: 12,
+                                            fontWeight: 700,
+                                            cursor: autoBetStartingEventId === String(autoBetSelectedMatch?.eventId ?? "") || Boolean(autoBetTaskData?.running) || !autoBetSelectedMatch?.eventId ? "not-allowed" : "pointer",
+                                            opacity: autoBetStartingEventId === String(autoBetSelectedMatch?.eventId ?? "") || Boolean(autoBetTaskData?.running) || !autoBetSelectedMatch?.eventId ? 0.6 : 1,
+                                        }}
+                                    >
+                                        {autoBetStartingEventId === String(autoBetSelectedMatch?.eventId ?? "") ? "启动中..." : "启动任务"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleStopAutoBet}
+                                        disabled={!autoBetTaskData?.running}
+                                        style={{
+                                            height: 36,
+                                            padding: "0 14px",
+                                            borderRadius: 10,
+                                            border: "1px solid #fecaca",
+                                            background: "#fef2f2",
+                                            color: "#b91c1c",
+                                            fontSize: 12,
+                                            fontWeight: 700,
+                                            cursor: autoBetTaskData?.running ? "pointer" : "not-allowed",
+                                            opacity: autoBetTaskData?.running ? 1 : 0.6,
+                                        }}
+                                    >
+                                        停止任务
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -3647,7 +3731,7 @@ export default function SoccerEarlyMarketPage() {
                         <div style={{ flex: 1, overflow: "auto", border: "1px solid #e5e7eb", borderRadius: 12, background: "#f8fafc" }}>
                             {!autoBetTaskData ? (
                                 <div style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>
-                                    {autoBetStartingEventId ? "正在启动任务..." : "请选择比赛并启动自动下注"}
+                                    {autoBetStartingEventId ? "正在启动任务..." : "请选择比赛并点击“启动任务”"}
                                 </div>
                             ) : autoBetFilteredAttempts.length > 0 ? (
                                 <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -3679,9 +3763,81 @@ export default function SoccerEarlyMarketPage() {
                                                 <div>玩法：<strong>{attempt?.oddsMarkets ?? "-"}</strong></div>
                                                 <div>订单：<strong>{attempt?.orderId ?? attempt?.externalOrderId ?? "-"}</strong></div>
                                             </div>
+                                            {(attempt?.requestSnapshot || attempt?.actualSnapshot) ? (
+                                                <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                                                    {attempt?.requestSnapshot ? (
+                                                        <div style={{ border: "1px solid #dbeafe", borderRadius: 10, background: "#eff6ff", padding: 10 }}>
+                                                            <div style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8", marginBottom: 6 }}>下注请求快照</div>
+                                                            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, fontSize: 12, color: "#1f2937" }}>
+                                                                <div>比分：<strong>{attempt?.requestSnapshot?.score || "-"}</strong></div>
+                                                                <div>赔率：<strong>{attempt?.requestSnapshot?.odds || "-"}</strong></div>
+                                                                <div>盘口：<strong>{attempt?.requestSnapshot?.handicap || "-"}</strong></div>
+                                                                <div>teamType：<strong>{attempt?.requestSnapshot?.teamType || "-"}</strong></div>
+                                                                <div>oddingId：<strong>{attempt?.requestSnapshot?.oddingId || "-"}</strong></div>
+                                                                <div>赔率时间：<strong>{formatTimelineTime(attempt?.requestSnapshot?.time)}</strong></div>
+                                                                <div>event比分：<strong>{attempt?.requestSnapshot?.eventBallScore || "-"}</strong></div>
+                                                                <div>赛事状态：<strong>{attempt?.requestSnapshot?.eventTimeStatus || "-"}</strong></div>
+                                                            </div>
+                                                        </div>
+                                                    ) : null}
+                                                    {attempt?.actualSnapshot ? (
+                                                        <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, background: "#f9fafb", padding: 10 }}>
+                                                            <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 6 }}>实际校验快照</div>
+                                                            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, fontSize: 12, color: "#1f2937" }}>
+                                                                <div>比分：<strong>{attempt?.actualSnapshot?.score || "-"}</strong></div>
+                                                                <div>赔率：<strong>{attempt?.actualSnapshot?.odds || "-"}</strong></div>
+                                                                <div>盘口：<strong>{attempt?.actualSnapshot?.handicap || "-"}</strong></div>
+                                                                <div>teamType：<strong>{attempt?.actualSnapshot?.teamType || "-"}</strong></div>
+                                                                <div>oddingId：<strong>{attempt?.actualSnapshot?.oddingId || "-"}</strong></div>
+                                                                <div>赔率时间：<strong>{formatTimelineTime(attempt?.actualSnapshot?.time)}</strong></div>
+                                                                <div>event比分：<strong>{attempt?.actualSnapshot?.eventBallScore || "-"}</strong></div>
+                                                                <div>赛事状态：<strong>{attempt?.actualSnapshot?.eventTimeStatus || "-"}</strong></div>
+                                                            </div>
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                            ) : null}
                                             <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                                                 {attempt?.detail || attempt?.serviceMsg || "-"}
                                             </div>
+                                            {attempt?.failurePayload ? (
+                                                <pre
+                                                    style={{
+                                                        marginTop: 8,
+                                                        padding: 10,
+                                                        borderRadius: 10,
+                                                        background: "#111827",
+                                                        color: "#e5e7eb",
+                                                        fontSize: 11,
+                                                        lineHeight: 1.5,
+                                                        overflowX: "auto",
+                                                        whiteSpace: "pre-wrap",
+                                                        wordBreak: "break-word",
+                                                    }}
+                                                >
+                                                    {typeof attempt.failurePayload === "string"
+                                                        ? attempt.failurePayload
+                                                        : JSON.stringify(attempt.failurePayload, null, 2)}
+                                                </pre>
+                                            ) : null}
+                                            {attempt?.externalResponse && attempt?.status === "EXTERNAL_FAILED" ? (
+                                                <pre
+                                                    style={{
+                                                        marginTop: 8,
+                                                        padding: 10,
+                                                        borderRadius: 10,
+                                                        background: "#1f2937",
+                                                        color: "#f9fafb",
+                                                        fontSize: 11,
+                                                        lineHeight: 1.5,
+                                                        overflowX: "auto",
+                                                        whiteSpace: "pre-wrap",
+                                                        wordBreak: "break-word",
+                                                    }}
+                                                >
+                                                    {JSON.stringify(attempt.externalResponse, null, 2)}
+                                                </pre>
+                                            ) : null}
                                         </div>
                                     ))}
                                 </div>

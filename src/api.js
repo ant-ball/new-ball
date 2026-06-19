@@ -315,3 +315,24 @@ export async function getAutoBetTask({
     }
     return { url, data: json };
 }
+
+export async function stopAutoBet({
+    baseUrl = DEFAULT_BASE_URL,
+    taskId,
+} = {}) {
+    if (!taskId) throw new Error("taskId 不能为空");
+    const params = new URLSearchParams({
+        taskId: String(taskId),
+    });
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/auto-bet/stop`;
+    const { response, json } = await requestJson(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+    });
+    if (!response.ok) throw new Error(`auto-bet/stop 失败 HTTP ${response.status}`);
+    if (json && json.code != null && String(json.code) !== "0") {
+        throw new Error(json.msg || "停止自动下注失败");
+    }
+    return { url, data: json };
+}
