@@ -1514,9 +1514,20 @@ export default function SoccerEarlyMarketPage() {
     const [autoBetError, setAutoBetError] = useState("");
     const [autoBetTaskId, setAutoBetTaskId] = useState("");
     const [autoBetTaskData, setAutoBetTaskData] = useState(null);
+    const [autoBetAttemptFilter, setAutoBetAttemptFilter] = useState("all");
     const [autoBetSelectedMatch, setAutoBetSelectedMatch] = useState(null);
     const autoBetPollTimerRef = useRef(null);
     const slipKeyRef = useRef(0);
+    const autoBetFilteredAttempts = useMemo(() => {
+        const attempts = Array.isArray(autoBetTaskData?.attempts) ? autoBetTaskData.attempts.slice().reverse() : [];
+        if (autoBetAttemptFilter === "success") {
+            return attempts.filter((attempt) => attempt?.status === "SUCCESS");
+        }
+        if (autoBetAttemptFilter === "failure") {
+            return attempts.filter((attempt) => ["REJECTED", "ERROR", "EXCEPTION"].includes(String(attempt?.status || "").toUpperCase()));
+        }
+        return attempts;
+    }, [autoBetAttemptFilter, autoBetTaskData?.attempts]);
 
     /** 玩法集合：type=1 早盘 type=5 滚球 type=6 其他；按 type -> smallId -> { betName, samllName, smallId } */
     const [associationList, setAssociationList] = useState([]);
@@ -3603,14 +3614,44 @@ export default function SoccerEarlyMarketPage() {
                             </div>
                         ) : null}
 
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                            {[
+                                { key: "all", label: `全部 ${Array.isArray(autoBetTaskData?.attempts) ? autoBetTaskData.attempts.length : 0}` },
+                                { key: "success", label: `成功 ${autoBetTaskData?.successCount ?? 0}` },
+                                { key: "failure", label: `失败 ${autoBetTaskData?.failureCount ?? 0}` },
+                            ].map((item) => {
+                                const active = autoBetAttemptFilter === item.key;
+                                return (
+                                    <button
+                                        key={item.key}
+                                        type="button"
+                                        onClick={() => setAutoBetAttemptFilter(item.key)}
+                                        style={{
+                                            height: 34,
+                                            padding: "0 14px",
+                                            borderRadius: 999,
+                                            border: active ? "1px solid #2563eb" : "1px solid #d1d5db",
+                                            background: active ? "#eff6ff" : "#fff",
+                                            color: active ? "#1d4ed8" : "#374151",
+                                            fontSize: 12,
+                                            fontWeight: 700,
+                                            cursor: "pointer",
+                                        }}
+                                    >
+                                        {item.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+
                         <div style={{ flex: 1, overflow: "auto", border: "1px solid #e5e7eb", borderRadius: 12, background: "#f8fafc" }}>
                             {!autoBetTaskData ? (
                                 <div style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>
                                     {autoBetStartingEventId ? "正在启动任务..." : "请选择比赛并启动自动下注"}
                                 </div>
-                            ) : Array.isArray(autoBetTaskData?.attempts) && autoBetTaskData.attempts.length > 0 ? (
+                            ) : autoBetFilteredAttempts.length > 0 ? (
                                 <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-                                    {autoBetTaskData.attempts.slice().reverse().map((attempt, index) => (
+                                    {autoBetFilteredAttempts.map((attempt, index) => (
                                         <div
                                             key={`${attempt?.ts ?? "na"}_${attempt?.oddingId ?? attempt?.marketKey ?? index}`}
                                             style={{
@@ -3646,7 +3687,7 @@ export default function SoccerEarlyMarketPage() {
                                 </div>
                             ) : (
                                 <div style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>
-                                    当前任务还没有下注记录
+                                    {Array.isArray(autoBetTaskData?.attempts) && autoBetTaskData.attempts.length > 0 ? "当前筛选条件下没有记录" : "当前任务还没有下注记录"}
                                 </div>
                             )}
                         </div>
