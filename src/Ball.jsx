@@ -1229,6 +1229,9 @@ const MAIN_MARKET_KEYS = [
     { key: "10143_goal_line", label: "球半" },
     { key: "43_correct_score", label: "波胆" },
     { key: "1579_half_time_result", label: "半场胜平负" },
+    { key: "10540_half_time_correct_score", label: "半场波胆" },
+    { key: "50137_1st_half_asian_handicap", label: "上半场亚盘" },
+    { key: "50136_1st_half_goal_line", label: "上半场大小球" },
     { key: "10257_half_time_double_chance", label: "半场双重机会" },
     { key: "42_half_time_full_time", label: "半&全场" },
 ];
@@ -1533,7 +1536,7 @@ export default function SoccerEarlyMarketPage() {
             return attempts.filter((attempt) => attempt?.status === "SUCCESS");
         }
         if (autoBetAttemptFilter === "newoddsRejected") {
-            return attempts.filter((attempt) => String(attempt?.status || "").toUpperCase() === "SKIPPED");
+            return attempts.filter((attempt) => Boolean(attempt?.precheckBypassed));
         }
         if (autoBetAttemptFilter === "failure") {
             return attempts.filter((attempt) => ["REJECTED", "ERROR", "EXCEPTION", "EXTERNAL_FAILED", "INSERT_FAILED"].includes(String(attempt?.status || "").toUpperCase()));
@@ -3766,7 +3769,10 @@ export default function SoccerEarlyMarketPage() {
                                 { key: "all", label: `全部 ${Array.isArray(autoBetTaskData?.attempts) ? autoBetTaskData.attempts.length : 0}` },
                                 { key: "success", label: `成功 ${autoBetTaskData?.successCount ?? 0}` },
                                 { key: "failure", label: `失败 ${autoBetTaskData?.failureCount ?? 0}` },
-                                { key: "newoddsRejected", label: `newodds拒绝 ${autoBetTaskData?.skippedCount ?? 0}` },
+                                {
+                                    key: "newoddsRejected",
+                                    label: `newodds旁路 ${Array.isArray(autoBetTaskData?.attempts) ? autoBetTaskData.attempts.filter((attempt) => Boolean(attempt?.precheckBypassed)).length : 0}`,
+                                },
                             ].map((item) => {
                                 const active = autoBetAttemptFilter === item.key;
                                 return (
@@ -3838,7 +3844,8 @@ export default function SoccerEarlyMarketPage() {
                                                                 <div>盘口：<strong>{attempt?.requestSnapshot?.handicap || "-"}</strong></div>
                                                                 <div>teamType：<strong>{attempt?.requestSnapshot?.teamType || "-"}</strong></div>
                                                                 <div>oddingId：<strong>{attempt?.requestSnapshot?.oddingId || "-"}</strong></div>
-                                                                <div>赔率时间：<strong>{formatTimelineTime(attempt?.requestSnapshot?.time)}</strong></div>
+                                                                <div>下注赔率生成时间：<strong>{formatTimelineTime(attempt?.requestSnapshot?.time)}</strong></div>
+                                                                <div>下注时间：<strong>{formatTimelineTime(attempt?.ts)}</strong></div>
                                                                 <div>event比分：<strong>{attempt?.requestSnapshot?.eventBallScore || "-"}</strong></div>
                                                                 <div>赛事状态：<strong>{attempt?.requestSnapshot?.eventTimeStatus || "-"}</strong></div>
                                                             </div>
@@ -3853,7 +3860,8 @@ export default function SoccerEarlyMarketPage() {
                                                                 <div>盘口：<strong>{attempt?.actualSnapshot?.handicap || "-"}</strong></div>
                                                                 <div>teamType：<strong>{attempt?.actualSnapshot?.teamType || "-"}</strong></div>
                                                                 <div>oddingId：<strong>{attempt?.actualSnapshot?.oddingId || "-"}</strong></div>
-                                                                <div>赔率时间：<strong>{formatTimelineTime(attempt?.actualSnapshot?.time)}</strong></div>
+                                                                <div>快照赔率生成时间：<strong>{formatTimelineTime(attempt?.actualSnapshot?.time)}</strong></div>
+                                                                <div>下注时间：<strong>{formatTimelineTime(attempt?.ts)}</strong></div>
                                                                 <div>event比分：<strong>{attempt?.actualSnapshot?.eventBallScore || "-"}</strong></div>
                                                                 <div>赛事状态：<strong>{attempt?.actualSnapshot?.eventTimeStatus || "-"}</strong></div>
                                                             </div>
