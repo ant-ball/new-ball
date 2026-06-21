@@ -1571,6 +1571,23 @@ export default function SoccerEarlyMarketPage() {
 
     // 日期 Tab：0=今日，1..9=往后 9 天
     const [selectedDayIndex, setSelectedDayIndex] = useState(0);
+
+    const getBetStatusMeta = (betStatus) => {
+        const status = Number(betStatus);
+        if (status === -1) {
+            return { label: "确认中", color: "#2563eb", background: "#eff6ff", borderColor: "#bfdbfe" };
+        }
+        if (status === -2) {
+            return { label: "串关确认中", color: "#7c3aed", background: "#f5f3ff", borderColor: "#ddd6fe" };
+        }
+        if (status === 0) {
+            return { label: "无效", color: "#dc2626", background: "#fef2f2", borderColor: "#fecaca" };
+        }
+        if (status === 1) {
+            return { label: "已确认", color: "#059669", background: "#ecfdf5", borderColor: "#a7f3d0" };
+        }
+        return null;
+    };
     const selectedDayTs = getSelectedDayTimestamp(selectedDayIndex);
     const isBasketballLeague = Number(selectedLeague?.sportId ?? sportId) === 18;
 
@@ -5108,6 +5125,9 @@ export default function SoccerEarlyMarketPage() {
                                 </div>
                             ) : (
                                 orderList.map((order) => (
+                                    (() => {
+                                        const betStatusMeta = getBetStatusMeta(order.betStatus);
+                                        return (
                                     <div
                                         key={order.orderId || order.createdTime}
                                         style={{
@@ -5119,7 +5139,26 @@ export default function SoccerEarlyMarketPage() {
                                         }}
                                     >
                                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                                            <span>订单号: {order.orderId || order.contact || "-"}</span>
+                                            <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                                <span>订单号: {order.orderId || order.contact || "-"}</span>
+                                                {betStatusMeta ? (
+                                                    <span
+                                                        style={{
+                                                            display: "inline-flex",
+                                                            alignItems: "center",
+                                                            padding: "2px 8px",
+                                                            borderRadius: 999,
+                                                            fontSize: 11,
+                                                            fontWeight: 600,
+                                                            color: betStatusMeta.color,
+                                                            background: betStatusMeta.background,
+                                                            border: `1px solid ${betStatusMeta.borderColor}`,
+                                                        }}
+                                                    >
+                                                        {betStatusMeta.label}
+                                                    </span>
+                                                ) : null}
+                                            </span>
                                             <span style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
                                                 <span>
                                                     金额: {order.betAmount} · 结算: {order.settlementAmount != null ? order.settlementAmount : "-"}
@@ -5181,6 +5220,8 @@ export default function SoccerEarlyMarketPage() {
                                             </div>
                                         )}
                                     </div>
+                                        );
+                                    })()
                                 ))
                             )}
                         </div>
