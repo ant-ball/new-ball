@@ -589,6 +589,42 @@ function formatCorrectScoreDisplay(value, direction) {
     return `${score.home}-${score.away}`;
 }
 
+function formatPreSelectionDisplay(marketKey, item, match) {
+    const marketId = String(marketKey ?? "").split("_")[0];
+    const handicap = item?.handicap != null ? String(item.handicap).trim() : "";
+    const nameText = item?.name != null ? String(item.name).trim() : "";
+    const headerText = item?.header != null ? String(item.header).trim() : "";
+
+    if (marketKey === "43_correct_score" || marketKey === "10540_half_time_correct_score") {
+        const direction = resolveCorrectScoreDirection(item?.team ?? item?.header, getHomeName(match), getAwayName(match));
+        return formatCorrectScoreDisplay(nameText, direction);
+    }
+
+    if (marketId === "938" || marketId === "50137" || marketId === "12") {
+        const teamCode = normalizeHomeAwayCode(item?.team ?? item?.header ?? item?.name, getHomeName(match), getAwayName(match));
+        const teamLabel = teamCode === "1"
+            ? getDisplayHomeName(match)
+            : teamCode === "2"
+                ? getDisplayAwayName(match)
+                : (nameText || headerText);
+        if (teamLabel && handicap) return `${teamLabel} (${handicap})`;
+        return teamLabel || handicap || "-";
+    }
+
+    if (marketId === "981" || marketId === "10143" || marketId === "50136" || marketId === "421") {
+        const overUnderCode = normalizeOverUnderCode(item?.header ?? item?.name);
+        const sideLabel = overUnderCode === "Over"
+            ? "大"
+            : overUnderCode === "Under"
+                ? "小"
+                : (nameText || headerText);
+        if (sideLabel && handicap) return `${sideLabel} ${handicap}`;
+        return sideLabel || handicap || "-";
+    }
+
+    return nameText || handicap || headerText || "-";
+}
+
 function normalizeNameToken(value) {
     return String(value ?? "")
         .toLowerCase()
@@ -905,9 +941,7 @@ function refreshSlipItemFromCurrentOdds(slipItem, matchRaw) {
         const atTime = oddsObj?.updateAt ?? oddsObj?.at_time ?? currentItem?.updateAt ?? currentItem?.at_time ?? slipItem.at_time ?? null;
         const nextOdds = parseFloat(currentItem?.odds);
         const correctScoreDirection = resolveCorrectScoreDirection(currentItem?.team ?? currentItem?.header, getHomeName(currentMatch), getAwayName(currentMatch));
-        const displaySelection = (marketKey === "43_correct_score" || marketKey === "10540_half_time_correct_score")
-            ? formatCorrectScoreDisplay(currentItem?.name, correctScoreDirection)
-            : (currentItem?.name != null ? currentItem.name : currentItem?.handicap);
+        const displaySelection = formatPreSelectionDisplay(marketKey, currentItem, currentMatch);
         return {
             ...slipItem,
             match: currentMatch,
@@ -1334,7 +1368,7 @@ function MarketOddsCell({ marketKey, label, oddsObj, match, onAddSlip }) {
                     (() => {
                         const displaySelection = isCorrectScore
                             ? formatCorrectScoreDisplay(item?.name, resolveCorrectScoreDirection(item?.team ?? item?.header, getHomeName(match), getAwayName(match)))
-                            : (item?.name != null ? item.name : item?.handicap);
+                            : formatPreSelectionDisplay(marketKey, item, match);
                         return (
                     <span
                         key={item.id || i}
@@ -1946,9 +1980,7 @@ export default function SoccerEarlyMarketPage() {
             const betPlayName = assoc?.samllName ?? _bpName ?? (marketKey ? marketKey.split("_").slice(1).join("_") : "");
             const betPlayId = assoc != null ? String(assoc.smallId) : playSmallId;
             const correctScoreDirection = resolveCorrectScoreDirection(item?.team ?? item?.header, getHomeName(match), getAwayName(match));
-            const displaySelection = (marketKey === "43_correct_score" || marketKey === "10540_half_time_correct_score")
-                ? formatCorrectScoreDisplay(item?.name, correctScoreDirection)
-                : (item?.name != null ? item.name : item?.handicap);
+            const displaySelection = formatPreSelectionDisplay(marketKey, item, match);
             setBetSlip((prev) => {
                 const nextItem = {
                     key: `pre_${match.id}_${item.id}_${slipKeyRef.current++}`,
