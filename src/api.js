@@ -22,6 +22,13 @@ function buildQuery(params = {}) {
     return search.toString();
 }
 
+function buildSoccerDebugQuery(params = {}) {
+    return buildQuery({
+        ...params,
+        isDebug: true,
+    });
+}
+
 function buildAuthHeaders(extra = {}) {
     const token = getStoredBallToken();
     return {
@@ -47,7 +54,7 @@ export async function getLeagueGroup({
     day,
     daysOfTime = 1,
 } = {}) {
-    const query = buildQuery({
+    const query = buildSoccerDebugQuery({
         type,
         sportId,
         sport_id: sportId,
@@ -61,14 +68,16 @@ export async function getLeagueGroup({
 }
 
 export async function getAssociation({ baseUrl = DEFAULT_BASE_URL } = {}) {
-    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/soccer/event/association`;
+    const query = buildSoccerDebugQuery();
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/soccer/event/association?${query}`;
     const { response, json } = await requestJson(url);
     if (!response.ok) throw new Error(`association 失败 HTTP ${response.status}`);
     return { url, data: json };
 }
 
 export async function newOdds({ baseUrl = DEFAULT_BASE_URL, betOrderList = [], isBestOdd = false } = {}) {
-    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/soccer/event/new-odds`;
+    const query = buildSoccerDebugQuery();
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/soccer/event/new-odds?${query}`;
     const { response, json } = await requestJson(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -249,7 +258,7 @@ export async function getBet365All({
     if (leagueIds == null || leagueIds === "") {
         throw new Error("leagueIds 不能为空");
     }
-    const query = buildQuery({
+    const query = buildSoccerDebugQuery({
         day: normalizeDayParam(day),
         leagueIds,
         daysOfTime,
@@ -264,7 +273,10 @@ export async function getBet365All({
 
 export async function getMatchResult({ baseUrl = DEFAULT_BASE_URL, eventId } = {}) {
     if (!eventId) throw new Error("eventId 不能为空");
-    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/event/result/queryByBet365Id?bet365Id=${encodeURIComponent(eventId)}`;
+    const query = buildSoccerDebugQuery({
+        bet365Id: eventId,
+    });
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/event/result/queryByBet365Id?${query}`;
     const { response, json } = await requestJson(url);
     if (!response.ok) throw new Error(`result 失败 HTTP ${response.status}`);
     return { url, data: json };
