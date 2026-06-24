@@ -2,6 +2,8 @@ import {
   formatInplaySelectionLabel,
   formatPreSelectionLabel,
   getMarketDisplayLabel,
+  parseCorrectScoreLabel,
+  resolveCorrectScoreDirection,
 } from './marketDisplay';
 
 const MAIN_MARKETS = [
@@ -46,6 +48,42 @@ function getMarketId(marketKey) {
   return String(marketKey).split('_')[0] || '';
 }
 
+function resolveCorrectScoreBucket(direction, label) {
+  if (direction === '1') return 'home';
+  if (direction === '2') return 'away';
+  if (direction === 'X') return 'draw';
+
+  const score = parseCorrectScoreLabel(label);
+  if (!score) return 'draw';
+  if (Number(score.home) > Number(score.away)) return 'home';
+  if (Number(score.home) < Number(score.away)) return 'away';
+  return 'draw';
+}
+
+function interleaveCorrectScoreItems(items, getDirection) {
+  const columns = {
+    home: [],
+    draw: [],
+    away: [],
+  };
+
+  items.forEach((item) => {
+    const bucket = resolveCorrectScoreBucket(getDirection(item), item?.label);
+    columns[bucket].push(item);
+  });
+
+  const ordered = [];
+  const maxLength = Math.max(columns.home.length, columns.draw.length, columns.away.length);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    if (columns.home[index]) ordered.push(columns.home[index]);
+    if (columns.draw[index]) ordered.push(columns.draw[index]);
+    if (columns.away[index]) ordered.push(columns.away[index]);
+  }
+
+  return ordered;
+}
+
 function getOrderedRollingMarkets(treeResults) {
   return (Array.isArray(treeResults) ? treeResults : [])
     .map((mavo, index) => ({ mavo, index }))
@@ -68,18 +106,26 @@ function getOrderedRollingMarkets(treeResults) {
 }
 
 function buildPreItem(match, marketKey, item, label, oddsObj) {
+  const direction = resolveCorrectScoreDirection(item?.team ?? item?.header, match);
+  const displayLabel = item?.displayLabel || formatPreSelectionLabel(match, marketKey, item);
   return {
     id: item?.id ?? item?.ID ?? getStableKey(marketKey, item?.header, item?.name, item?.handicap, item?.odds ?? item?.OD ?? item?.od ?? item?.price),
-    label: item?.displayLabel || formatPreSelectionLabel(match, marketKey, item),
+    label: displayLabel,
     odds: oddsValue(item?.odds ?? item?.OD ?? item?.od ?? item?.price),
     suspended: false,
     raw: item,
+    correctScoreDirection: direction,
     pickPayload: {
       type: 'pre',
       match,
       marketKey,
       label,
-      item: { ...item, displayLabel: formatPreSelectionLabel(match, marketKey, item), odds: oddsValue(item?.odds ?? item?.OD ?? item?.od ?? item?.price) },
+      item: {
+        ...item,
+        displayLabel,
+        correctScoreDirection: direction,
+        odds: oddsValue(item?.odds ?? item?.OD ?? item?.od ?? item?.price),
+      },
       oddsObj,
       betPlayId: String(getMarketId(marketKey)),
       betPlayName: String(marketKey).split('_').slice(1).join('_'),
@@ -92,18 +138,21 @@ function buildInplayItem(match, mavo, pa) {
   const odds = oddsValue(pa?.od ?? pa?.OD);
   const odDecimal = Number.parseFloat(pa?.od ?? pa?.OD);
   const suspended = String(pa?.od ?? pa?.OD ?? '').trim() === '' || String(pa?.od ?? pa?.OD ?? '').trim() === '-';
+  const direction = resolveCorrectScoreDirection(pa?.pNa ?? pa?.n2 ?? pa?.N2 ?? pa?.ha ?? pa?.HA, match);
+  const label = formatInplaySelectionLabel(match, mavo, pa);
 
   return {
     id: pa?.id ?? pa?.ID ?? getStableKey(mavo?.id, mavo?.ID, pa?.na, pa?.NA, pa?.pNa, pa?.ha, pa?.HA, pa?.od, pa?.OD),
-    label: formatInplaySelectionLabel(match, mavo, pa),
+    label,
     odds,
     suspended,
     raw: pa,
+    correctScoreDirection: direction,
     pickPayload: {
       type: 'inplay',
       match,
       mavo,
-      pa,
+      pa: { ...pa, displayLabel: label, correctScoreDirection: direction },
       odDecimal,
     },
   };
@@ -143,7 +192,10 @@ function buildCorrectScoreSections(match, isRolling) {
       .map((mavo) => ({
         key: String(mavo?.id ?? mavo?.ID ?? ''),
         label: getMarketDisplayLabel(mavo?.id ?? mavo?.ID, mavo?.na ?? mavo?.NA ?? '波胆'),
-        items: (mavo?.co ?? []).flatMap((c) => c.pa || []).map((pa) => buildInplayItem(match, mavo, pa)),
+        items: interleaveCorrectScoreItems(
+          (mavo?.co ?? []).flatMap((c) => c.pa || []).map((pa) => buildInplayItem(match, mavo, pa)),
+          (item) => item?.correctScoreDirection,
+        ),
       }))
       .filter((section) => section.items.length > 0);
   }
@@ -155,7 +207,10 @@ function buildCorrectScoreSections(match, isRolling) {
     return {
       key: marketKey,
       label,
-      items: list.map((item) => buildPreItem(match, marketKey, item, label, oddsObj)),
+      items: interleaveCorrectScoreItems(
+        list.map((item) => buildPreItem(match, marketKey, item, label, oddsObj)),
+        (entry) => entry?.correctScoreDirection,
+      ),
     };
   }).filter((section) => section.items.length > 0);
 }

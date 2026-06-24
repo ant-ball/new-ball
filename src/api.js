@@ -135,6 +135,26 @@ export async function getOrderList({
     return { url, data: json };
 }
 
+export async function previewOrderSettlement({
+    baseUrl = DEFAULT_BASE_URL,
+    orderId,
+    homeScore,
+    awayScore,
+} = {}) {
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/settlement-preview`;
+    const { response, json } = await requestJson(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            orderId,
+            homeScore,
+            awayScore,
+        }),
+    });
+    if (!response.ok) throw new Error(`order/settlement-preview 失败 HTTP ${response.status}`);
+    return { url, data: json };
+}
+
 export async function getOrderFlow({ baseUrl = DEFAULT_BASE_URL } = {}) {
     const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/flow`;
     const { response, json } = await requestJson(url);
@@ -279,5 +299,63 @@ export async function getMatchResult({ baseUrl = DEFAULT_BASE_URL, eventId } = {
     const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/event/result/queryByBet365Id?${query}`;
     const { response, json } = await requestJson(url);
     if (!response.ok) throw new Error(`result 失败 HTTP ${response.status}`);
+    return { url, data: json };
+}
+
+export async function startAutoBet({
+    baseUrl = DEFAULT_BASE_URL,
+    eventId,
+    windowMinutes = 5,
+} = {}) {
+    if (!eventId) throw new Error("eventId 不能为空");
+    const params = new URLSearchParams({
+        eventId: String(eventId),
+        windowMinutes: String(windowMinutes > 0 ? windowMinutes : 5),
+    });
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/auto-bet/start`;
+    const { response, json } = await requestJson(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+    });
+    if (!response.ok) throw new Error(`auto-bet/start 失败 HTTP ${response.status}`);
+    if (json && json.code != null && String(json.code) !== "0") {
+        throw new Error(json.msg || "启动自动下注失败");
+    }
+    return { url, data: json };
+}
+
+export async function getAutoBetTask({
+    baseUrl = DEFAULT_BASE_URL,
+    taskId,
+} = {}) {
+    if (!taskId) throw new Error("taskId 不能为空");
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/auto-bet/task?taskId=${encodeURIComponent(taskId)}`;
+    const { response, json } = await requestJson(url);
+    if (!response.ok) throw new Error(`auto-bet/task 失败 HTTP ${response.status}`);
+    if (json && json.code != null && String(json.code) !== "0") {
+        throw new Error(json.msg || "查询自动下注任务失败");
+    }
+    return { url, data: json };
+}
+
+export async function stopAutoBet({
+    baseUrl = DEFAULT_BASE_URL,
+    taskId,
+} = {}) {
+    if (!taskId) throw new Error("taskId 不能为空");
+    const params = new URLSearchParams({
+        taskId: String(taskId),
+    });
+    const url = `${(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "")}/order/auto-bet/stop`;
+    const { response, json } = await requestJson(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+    });
+    if (!response.ok) throw new Error(`auto-bet/stop 失败 HTTP ${response.status}`);
+    if (json && json.code != null && String(json.code) !== "0") {
+        throw new Error(json.msg || "停止自动下注失败");
+    }
     return { url, data: json };
 }
