@@ -58,6 +58,26 @@ export async function fetchPolymarketCategories(baseUrl) {
   return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
 }
 
+export async function fetchPolymarketMerchantCategories(baseUrl) {
+  const { url, json } = await requestJson(baseUrl, "/polymarket/merchant/categories");
+  const data = unwrapData(json);
+  return { url, data: Array.isArray(data) ? data : [], meta: unwrapPageMeta(json) };
+}
+
+export async function fetchPolymarketMerchantPlays(baseUrl, { categoryId = "", keyword = "", page = 1, size = 20, lang = "zh-CN" } = {}) {
+  const suffix = `${categoryId ? `&categoryId=${encodeURIComponent(categoryId)}` : ""}${keyword ? `&keyword=${encodeURIComponent(keyword)}` : ""}${lang ? `&lang=${encodeURIComponent(lang)}` : ""}`;
+  const { url, json } = await requestJson(baseUrl, `/polymarket/merchant/plays?page=${page}&size=${size}${suffix}`);
+  return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
+}
+
+export async function fetchPolymarketMerchantPlayDetail(baseUrl, merchantPlayId, lang = "zh-CN") {
+  const { url, json } = await requestJson(
+    baseUrl,
+    `/polymarket/merchant/play-detail?merchantPlayId=${encodeURIComponent(merchantPlayId)}&lang=${encodeURIComponent(lang)}`
+  );
+  return { url, data: unwrapData(json) || null };
+}
+
 export async function fetchPolymarketEvents(baseUrl, category, page = 1, size = 20) {
   const suffix = category ? `&category=${encodeURIComponent(category)}` : "";
   const { url, json } = await requestJson(baseUrl, `/polymarket/events?page=${page}&size=${size}${suffix}`);
