@@ -7,6 +7,7 @@ import MatchCard from './components/MatchCard';
 import SlipDrawer from './components/SlipDrawer';
 import TransferDrawer from './components/TransferDrawer';
 import { fetchUserBalance, fetchUserInfo, getExternalTokenFromUrl, getStoredBallToken, tokenLogin } from './auth';
+import { getBallApiBaseUrl } from './config';
 import {
   formatInplaySelectionLabel,
   formatPreSelectionLabel,
@@ -48,7 +49,7 @@ import {
 } from './transfer';
 import { useOddsSocket } from './useOddsSocket';
 
-const BASE_URL = 'https://ball.skybit.shop';
+const BASE_URL = getBallApiBaseUrl();
 
 const TOP_TABS = ['滚球', '今日', '早盘', '冠军', '综合过关'];
 const SPORT_TABS = [
@@ -176,6 +177,7 @@ function getLiveClockDisplay(match) {
   if (match?.timeStatus !== '1' && match?.rolling !== true) return '';
   const min = Number(match?.liveClockMinute ?? match?.tM ?? 0);
   const sec = Number(match?.liveClockSecond ?? match?.tS ?? 0);
+  const elapsedSeconds = Number(match?.clockEstimatedElapsedSeconds);
   const hasClock = (
     match?.liveClockMinute != null ||
     match?.liveClockSecond != null ||
@@ -184,7 +186,7 @@ function getLiveClockDisplay(match) {
   );
   if (!hasClock && min === 0 && sec === 0) return '';
   if (Number.isNaN(min) || Number.isNaN(sec)) return '';
-  const half = match?.liveHalf ?? (min < 45 ? 1 : 2);
+  const half = match?.liveHalf ?? (Number.isFinite(elapsedSeconds) ? (elapsedSeconds < 45 * 60 ? 1 : 2) : (min < 45 ? 1 : 2));
   const halfLabel = half === 1 ? '上半场' : '下半场';
   return `${halfLabel} ${Math.max(0, min)}:${String(Math.max(0, Math.min(59, sec))).padStart(2, '0')}`;
 }

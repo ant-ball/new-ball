@@ -19,6 +19,7 @@ import {
     stopAutoBet,
 } from "./api";
 import { useOddsSocket } from "./useOddsSocket";
+import { getBallApiBaseUrl } from "./config";
 
 function getMatchListFromOddsResponse(raw, matchType) {
     // 尽量兼容不同返回结构
@@ -72,6 +73,26 @@ function normalizeMavoFromWs(mavo) {
     addLowerAliases(mavo, MAVO_KEYS);
     if (Array.isArray(mavo.co)) mavo.co.forEach(normalizeCo);
     return mavo;
+}
+
+function applyClockAnchorFromPush(match, push) {
+    if (!match || !push) return match;
+    const incomingSignature = push.clockBaseSignature != null && push.clockBaseSignature !== "" ? String(push.clockBaseSignature) : "";
+    const existingSignature = match.clockBaseSignature != null && match.clockBaseSignature !== "" ? String(match.clockBaseSignature) : "";
+    if (!incomingSignature) return match;
+    if (incomingSignature === existingSignature) return match;
+    const anchor = {};
+    ["clockBaseTM", "clockBaseTS", "clockBaseCP", "clockBaseTT", "clockBaseReceivedAt", "clockBaseElapsedSeconds", "clockEstimatedElapsedSeconds", "clockBaseSignature"].forEach((key) => {
+        if (push[key] != null && push[key] !== "") {
+            anchor[key] = push[key];
+        }
+    });
+    if (Object.keys(anchor).length === 0) return match;
+    return {
+        ...match,
+        ...anchor,
+        liveClockSource: "anchor",
+    };
 }
 
 /** 从合并前的数据里找出本场、本玩法中「赔率发生变化」的选项 id 列表（用于只高亮变化的赔率）。
@@ -161,7 +182,7 @@ function mergeMavoIntoMatchRaw(prevRaw, mavo) {
             } else {
                 tree.push(mavo);
             }
-            let updatedMatch = { ...match, treeResults: tree };
+            let updatedMatch = applyClockAnchorFromPush({ ...match, treeResults: tree }, mavo);
             const pushScore = mavo.sS ?? mavo.SS;
             if (pushScore != null) updatedMatch.ballScore = String(pushScore);
             const pushQuarter = mavo.q ?? mavo.Q;
@@ -430,25 +451,44 @@ function getMatchKey(match, index) {
 function hydrateMatchClockFromRawMatch(match, nowMs = Date.now()) {
     if (!match || typeof match !== "object") return match;
 
-    const minuteRaw = match?.liveClockMinute ?? match?.tm ?? match?.TM;
-    const secondRaw = match?.liveClockSecond ?? match?.ts ?? match?.TS;
+    const anchorMinuteRaw = match?.clockBaseTM;
+    const anchorSecondRaw = match?.clockBaseTS;
+    const anchorHalfPayload = {
+        cp: match?.clockBaseCP,
+        CP: match?.clockBaseCP,
+        tt: match?.clockBaseTT,
+        TT: match?.clockBaseTT,
+        tm: match?.clockBaseTM,
+        TM: match?.clockBaseTM,
+        ts: match?.clockBaseTS,
+        TS: match?.clockBaseTS,
+    };
+    const minuteRaw = anchorMinuteRaw ?? match?.liveClockMinute ?? match?.tm ?? match?.TM;
+    const secondRaw = anchorSecondRaw ?? match?.liveClockSecond ?? match?.ts ?? match?.TS;
     const minute = Number(minuteRaw);
     const second = Number(secondRaw);
     if (!Number.isFinite(minute) && !Number.isFinite(second)) return match;
 
     const safeMinute = Number.isFinite(minute) ? Math.max(0, minute) : 0;
     const safeSecond = Number.isFinite(second) ? Math.max(0, Math.min(59, second)) : 0;
-    const half = match?.liveHalf ?? parseHalfFromPayload(match) ?? (safeMinute <= 45 ? 1 : 2);
+    const estimatedElapsedNum = Number(match?.clockEstimatedElapsedSeconds);
+    const fallbackElapsedSeconds = Number.isFinite(estimatedElapsedNum)
+        ? Math.max(0, estimatedElapsedNum)
+        : (safeMinute * 60 + safeSecond);
+    const half = parseHalfFromPayload(anchorHalfPayload, fallbackElapsedSeconds)
+        ?? parseHalfFromPayload(match, fallbackElapsedSeconds)
+        ?? (fallbackElapsedSeconds < 45 * 60 ? 1 : 2);
+    const anchorReceivedAt = match?.clockBaseReceivedAt != null ? Number(match.clockBaseReceivedAt) : null;
     return {
         ...match,
         timeStatus: match?.timeStatus ?? String(match?.timeStatus ?? match?.tt ?? match?.TT ?? ""),
         liveClockMinute: safeMinute,
         liveClockSecond: safeSecond,
-        liveClockUpdatedAt: match?.liveClockUpdatedAt ?? nowMs,
+        liveClockUpdatedAt: Number.isFinite(anchorReceivedAt) ? anchorReceivedAt : (match?.liveClockUpdatedAt ?? nowMs),
         liveHalf: half,
         liveClockIsPeriodTime: true,
         liveClockOnBreak: isTtBreak(match),
-        liveClockSource: match?.liveClockSource ?? "snapshot",
+        liveClockSource: match?.liveClockSource ?? (match?.clockBaseReceivedAt != null ? "anchor" : "snapshot"),
         liveClockKey: buildLiveClockKey(half, safeMinute, safeSecond),
     };
 }
@@ -698,24 +738,22 @@ function isTtBreak(mavo) {
     return n === 0;
 }
 
-/** 解析半场：Bet365 标准用 CP(CURRENT_PERIOD)：1=上半场 2=下半场。TT 官方含义为 playing/break，不能当半场用。无 CP 时用 TM（比赛分钟）推断：≤45 上半场，>45 下半场；再兜底用 tt 0=上 1=下 */
-function parseHalfFromPayload(mavo) {
+/** 解析半场：Bet365 标准用 CP(CURRENT_PERIOD)：1=上半场 2=下半场。TT 官方含义为 playing/break，不能当半场用。无 CP 时优先看累计比赛秒数，再看 TM（比赛分钟）推断。 */
+function parseHalfFromPayload(mavo, fallbackElapsedSeconds = null) {
     const cp = mavo?.cp ?? mavo?.CP;
     if (cp != null && cp !== "") {
         const n = typeof cp === "string" ? parseInt(cp, 10) : Number(cp);
         if (n === 1) return 1;
         if (n === 2) return 2;
     }
+    const elapsedNum = Number(fallbackElapsedSeconds);
+    if (Number.isFinite(elapsedNum)) {
+        return elapsedNum < 45 * 60 ? 1 : 2;
+    }
     const tM = mavo?.tM ?? mavo?.TM;
     if (tM != null && tM !== "") {
         const n = typeof tM === "string" ? parseInt(tM, 10) : Number(tM);
         if (Number.isFinite(n)) return n <= 45 ? 1 : 2;
-    }
-    const tt = mavo?.tt ?? mavo?.TT;
-    if (tt != null && tt !== "") {
-        const n = typeof tt === "string" ? parseInt(tt, 10) : Number(tt);
-        if (n === 0) return 1;
-        if (n === 1) return 2;
     }
     return null;
 }
@@ -978,21 +1016,32 @@ function getScore(match) {
 function getLiveClockDisplay(match, nowTick, sportIdValue = null) {
     if (match?.timeStatus !== "1") return null;
     const onBreak = match?.liveClockOnBreak === true;
-    const baseMinRaw = match?.liveClockMinute ?? match?.tm ?? match?.TM;
-    const baseSecRaw = match?.liveClockSecond ?? match?.ts ?? match?.TS;
+    const baseMinRaw = match?.clockBaseTM ?? match?.liveClockMinute ?? match?.tm ?? match?.TM;
+    const baseSecRaw = match?.clockBaseTS ?? match?.liveClockSecond ?? match?.ts ?? match?.TS;
     const baseMinNum = Number(baseMinRaw);
     const baseSecNum = Number(baseSecRaw);
     if (!Number.isFinite(baseMinNum) && !Number.isFinite(baseSecNum)) return null;
     const baseMin = Number.isFinite(baseMinNum) ? Math.max(0, baseMinNum) : 0;
     const baseSec = Number.isFinite(baseSecNum) ? Math.max(0, Math.min(59, baseSecNum)) : 0;
-    const updatedAt = match?.liveClockUpdatedAt;
+    const baseElapsedNum = Number(match?.clockEstimatedElapsedSeconds);
+    const baseTotalSec = Number.isFinite(baseElapsedNum) ? Math.max(0, baseElapsedNum) : baseMin * 60 + baseSec;
+    const updatedAt = match?.clockBaseReceivedAt ?? match?.liveClockUpdatedAt;
     if (updatedAt == null && baseMin == null && baseSec == null) return null;
-    const totalSec = baseMin * 60 + baseSec + (onBreak ? 0 : (updatedAt != null && nowTick != null ? Math.max(0, Math.floor((nowTick - updatedAt) / 1000)) : 0));
+    const totalSec = baseTotalSec + (onBreak ? 0 : (updatedAt != null && nowTick != null ? Math.max(0, Math.floor((nowTick - updatedAt) / 1000)) : 0));
     const isBasketball = Number(sportIdValue ?? match?.sportId ?? match?.sport_id) === 18;
     const latestMavo = getLatestRollingMavo(match);
     const quarterRaw = match?.q ?? match?.Q ?? latestMavo?.q ?? latestMavo?.Q ?? match?.liveQuarter ?? match?.livePeriod;
     const quarterNum = Number(quarterRaw);
-    const half = match?.liveHalf ?? parseHalfFromPayload(match) ?? (baseMin < 45 ? 1 : 2);
+    const half = parseHalfFromPayload({
+        cp: match?.clockBaseCP,
+        CP: match?.clockBaseCP,
+        tt: match?.clockBaseTT,
+        TT: match?.clockBaseTT,
+        tm: match?.clockBaseTM ?? match?.tm ?? match?.TM,
+        TM: match?.clockBaseTM ?? match?.tm ?? match?.TM,
+        ts: match?.clockBaseTS ?? match?.ts ?? match?.TS,
+        TS: match?.clockBaseTS ?? match?.ts ?? match?.TS,
+    }, totalSec) ?? parseHalfFromPayload(match, totalSec) ?? (totalSec < 45 * 60 ? 1 : 2);
     const halfLabel = half === 1 ? "上半场" : "下半场";
     const periodLabel = isBasketball && Number.isFinite(quarterNum) && quarterNum > 0 ? `第${quarterNum}节` : halfLabel;
     const isPeriodTime = isBasketball && match?.liveClockIsPeriodTime === true;
@@ -1042,6 +1091,9 @@ function getRawWsClockDisplay(match) {
 
 function formatTimeDebugValue(value) {
     if (value == null || value === "") return "-";
+    if (typeof value === "object" && value.raw != null && value.local != null) {
+        return `${value.raw} => ${value.local}`;
+    }
     if (typeof value === "object") {
         try {
             return JSON.stringify(value);
@@ -1052,8 +1104,65 @@ function formatTimeDebugValue(value) {
     return String(value);
 }
 
+function formatElapsedClockLabel(totalSeconds) {
+    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "-";
+    const minute = Math.floor(totalSeconds / 60);
+    const second = Math.floor(totalSeconds % 60);
+    return `${minute}分${String(second).padStart(2, "0")}秒`;
+}
+
+function formatLocalDateTimeFromMs(ts) {
+    if (ts == null || ts === "") return null;
+    const num = Number(ts);
+    if (!Number.isFinite(num)) return null;
+    const date = new Date(num);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleString("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+    });
+}
+
+function normalizeTimeLikeValue(raw, kind = "auto") {
+    if (raw == null || raw === "") return null;
+    const str = String(raw).trim();
+    if (!str) return null;
+
+    let ts = null;
+    if (kind === "tu" || (/^\d{14}$/.test(str) && kind === "auto")) {
+        ts = parseTUToUtcMs(str);
+    } else {
+        const num = Number(str);
+        if (Number.isFinite(num)) {
+            ts = num < 1e12 ? num * 1000 : num;
+        }
+    }
+
+    if (ts == null) return { raw: str, local: "-" };
+    const local = formatLocalDateTimeFromMs(ts);
+    return local ? { raw: str, local } : { raw: str, local: "-" };
+}
+
+function getElapsedSecondsSinceKickoff(match) {
+    const kickoffMs = getMatchKickoffMs(match) ?? getKickoffMs(match);
+    if (kickoffMs == null || !Number.isFinite(Number(kickoffMs))) return null;
+    return Math.max(0, Math.floor((Date.now() - Number(kickoffMs)) / 1000));
+}
+
 function buildTimeDebugGroups(match) {
     const latestMavo = getLatestRollingMavo(match);
+    const elapsedSinceKickoff = getElapsedSecondsSinceKickoff(match);
+    const liveMinute = Number(match?.liveClockMinute);
+    const liveSecond = Number(match?.liveClockSecond);
+    const liveTotalSeconds = Number.isFinite(liveMinute) ? liveMinute * 60 + (Number.isFinite(liveSecond) ? liveSecond : 0) : null;
+    const elapsedDriftSeconds = Number.isFinite(elapsedSinceKickoff) && Number.isFinite(liveTotalSeconds)
+        ? elapsedSinceKickoff - liveTotalSeconds
+        : null;
 
     return [
         {
@@ -1066,12 +1175,12 @@ function buildTimeDebugGroups(match) {
                 ["TT/tt", match?.TT ?? match?.tt],
                 ["TM/tm", match?.TM ?? match?.tm],
                 ["TS/ts", match?.TS ?? match?.ts],
-                ["TU/tu", match?.TU ?? match?.tu],
+                ["TU/tu", normalizeTimeLikeValue(match?.TU ?? match?.tu, "tu")],
                 ["Q/q", match?.Q ?? match?.q],
-                ["time", match?.time],
-                ["matchTime", match?.matchTime],
-                ["startTime", match?.startTime],
-                ["eventTime", match?.eventTime],
+                ["time", normalizeTimeLikeValue(match?.time)],
+                ["matchTime", normalizeTimeLikeValue(match?.matchTime)],
+                ["startTime", normalizeTimeLikeValue(match?.startTime)],
+                ["eventTime", normalizeTimeLikeValue(match?.eventTime)],
                 ["ballScore", match?.ballScore],
             ],
         },
@@ -1082,14 +1191,29 @@ function buildTimeDebugGroups(match) {
             rows: [
                 ["mavo.id", latestMavo?.id ?? latestMavo?.ID],
                 ["mavo.name", latestMavo?.na ?? latestMavo?.NA],
-                ["mavo.updateAt", latestMavo?.updateAt ?? latestMavo?.UpdateAt],
+                ["mavo.updateAt", normalizeTimeLikeValue(latestMavo?.updateAt ?? latestMavo?.UpdateAt)],
                 ["mavo.CP/cp", latestMavo?.CP ?? latestMavo?.cp],
                 ["mavo.TT/tt", latestMavo?.TT ?? latestMavo?.tt],
                 ["mavo.TM/tm", latestMavo?.TM ?? latestMavo?.tm],
                 ["mavo.TS/ts", latestMavo?.TS ?? latestMavo?.ts],
-                ["mavo.TU/tu", latestMavo?.TU ?? latestMavo?.tu],
+                ["mavo.TU/tu", normalizeTimeLikeValue(latestMavo?.TU ?? latestMavo?.tu, "tu")],
                 ["mavo.Q/q", latestMavo?.Q ?? latestMavo?.q],
                 ["mavo.SS/ss", latestMavo?.SS ?? latestMavo?.ss],
+            ],
+        },
+        {
+            key: "clockAnchor",
+            title: "后端时间锚点",
+            source: "后端首次收到同一组 TM/TS 时写入，前端据此补秒",
+            rows: [
+                ["clockBaseTM", match?.clockBaseTM],
+                ["clockBaseTS", match?.clockBaseTS],
+                ["clockBaseCP", match?.clockBaseCP],
+                ["clockBaseTT", match?.clockBaseTT],
+                ["clockBaseReceivedAt", normalizeTimeLikeValue(match?.clockBaseReceivedAt)],
+                ["clockBaseElapsedSeconds", match?.clockBaseElapsedSeconds],
+                ["clockEstimatedElapsedSeconds", match?.clockEstimatedElapsedSeconds],
+                ["clockBaseSignature", match?.clockBaseSignature],
             ],
         },
         {
@@ -1100,12 +1224,17 @@ function buildTimeDebugGroups(match) {
                 ["rawWsClockDisplay", getRawWsClockDisplay(match)],
                 ["liveClockMinute", match?.liveClockMinute],
                 ["liveClockSecond", match?.liveClockSecond],
-                ["liveClockUpdatedAt", match?.liveClockUpdatedAt],
+                ["liveClockUpdatedAt", normalizeTimeLikeValue(match?.liveClockUpdatedAt)],
                 ["liveHalf", match?.liveHalf],
                 ["liveClockOnBreak", match?.liveClockOnBreak],
                 ["liveClockIsPeriodTime", match?.liveClockIsPeriodTime],
                 ["liveClockSource", match?.liveClockSource],
                 ["liveClockKey", match?.liveClockKey],
+                ["currentLocalNow", formatLocalDateTimeFromMs(Date.now())],
+                ["kickoffElapsedNow", formatElapsedClockLabel(elapsedSinceKickoff)],
+                ["kickoffElapsedMinutes", Number.isFinite(elapsedSinceKickoff) ? Math.floor(elapsedSinceKickoff / 60) : "-"],
+                ["clockDriftVsKickoff", Number.isFinite(elapsedDriftSeconds) ? `${elapsedDriftSeconds >= 0 ? "+" : ""}${elapsedDriftSeconds}s` : "-"],
+                ["halfByKickoffElapsed", Number.isFinite(elapsedSinceKickoff) ? (Math.floor(elapsedSinceKickoff / 60) <= 45 ? 1 : 2) : "-"],
                 ["liveClockDisplay", getLiveClockDisplay(match, Date.now(), Number(match?.sportId ?? match?.sport_id) || null)],
                 ["matchTimeDisplay", getMatchTime(match)],
                 ["scoreDisplay", getScore(match)],
@@ -1337,7 +1466,7 @@ function RollingMarketCell({ mavo, match, onAddSlip, highlight }) {
 }
 
 export default function SoccerEarlyMarketPage() {
-    const [baseUrl, setBaseUrl] = useState("https://ball.skybit.shop");
+    const [baseUrl, setBaseUrl] = useState(getBallApiBaseUrl);
     const [authReady, setAuthReady] = useState(false);
     const [sportId, setSportId] = useState(1);
     const [type, setType] = useState("0");
@@ -1591,7 +1720,7 @@ export default function SoccerEarlyMarketPage() {
                         const match = value[i];
                         const mid = match?.id != null ? String(match.id) : match?.bet365Id != null ? String(match.bet365Id) : null;
                         if (mid !== eventIdStr) continue;
-                        const next = { ...match };
+                        const next = applyClockAnchorFromPush({ ...match }, item);
                         if (timeStatus != null) next.timeStatus = timeStatus;
                         if (Number.isFinite(quarterNum)) {
                             next.q = quarterNum;
@@ -3143,7 +3272,7 @@ export default function SoccerEarlyMarketPage() {
                                                                         <div style={{ padding: "6px 10px", borderTop: "1px solid #f3f4f6", color: "#6b7280", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
                                                                             {field}
                                                                         </div>
-                                                                        <div style={{ padding: "6px 10px", borderTop: "1px solid #f3f4f6", color: "#111827", wordBreak: "break-all", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                                                                        <div style={{ padding: "6px 10px", borderTop: "1px solid #f3f4f6", color: "#111827", wordBreak: "break-all", whiteSpace: "pre-line", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
                                                                             {formatTimeDebugValue(value)}
                                                                         </div>
                                                                     </React.Fragment>

@@ -3,9 +3,10 @@ import './App.css';
 import Ball from './Ball';
 import { fetchUserBalance, fetchUserInfo, getExternalTokenFromUrl, getStoredBallToken, tokenLogin } from './auth';
 import PolymarketApp from './PolymarketApp';
+import { getBallApiBaseUrl } from './config';
 
 function App() {
-  const [baseUrl] = useState('https://ball.skybit.shop');
+  const [baseUrl] = useState(getBallApiBaseUrl);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState('');
   const [userInfo, setUserInfo] = useState(null);

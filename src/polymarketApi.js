@@ -1,6 +1,7 @@
 import { buildAuthHeaders } from "./auth";
+import { getBallApiBaseUrl } from "./config";
 
-const DEFAULT_BASE_URL = "https://ball.skybit.shop";
+const DEFAULT_BASE_URL = getBallApiBaseUrl();
 
 function normalizeBaseUrl(baseUrl) {
   return (baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
