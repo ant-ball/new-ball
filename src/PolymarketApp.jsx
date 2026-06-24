@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   fetchPolymarketMerchantCategories,
   fetchPolymarketMerchantPlays,
-  fetchPolymarketPrices,
+  fetchPolymarketMerchantPrices,
   fetchPolymarketGraph,
   createPolymarketOrder,
   fetchPolymarketMarketPosition,
@@ -635,6 +635,7 @@ function normalizePricePatch(message) {
     return null;
   }
   return {
+    merchantPlayId: data.merchantPlayId ?? data.merchant_play_id ?? message?.merchantPlayId ?? null,
     pmMarketId,
     outcomeIndex,
     outcomeName: data.outcomeName ?? data.outcome_name ?? null,
@@ -663,14 +664,17 @@ function normalizeResultPatch(message) {
   };
 }
 
-function buildLatestPrices(prices, pmMarketId) {
+function buildLatestPrices(prices, merchantPlayId, pmMarketId) {
   if (!Array.isArray(prices)) return [];
+  if (merchantPlayId != null && merchantPlayId !== "") {
+    return prices.filter((row) => row && String(row.merchantPlayId || "") === String(merchantPlayId));
+  }
   return prices.filter((row) => row && row.pmMarketId === pmMarketId);
 }
 
 function attachLatestPrices(item, prices) {
   if (!item) return item;
-  const latestPrices = buildLatestPrices(prices, item.pmMarketId);
+  const latestPrices = buildLatestPrices(prices, item.merchantPlayId, item.pmMarketId);
   return latestPrices.length > 0 ? { ...item, latestPrices } : item;
 }
 
@@ -731,6 +735,7 @@ function PolymarketApp({ baseUrl, balance }) {
   const [activeTab, setActiveTab] = useState("markets");
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedMerchantPlayId, setSelectedMerchantPlayId] = useState("");
   const [selectedMarketId, setSelectedMarketId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
@@ -808,6 +813,12 @@ function PolymarketApp({ baseUrl, balance }) {
         markets: sortedMarkets,
       };
     });
+    setSelectedMerchantPlayId((prev) => {
+      if (prev && nextMarkets.some((item) => String(item?.merchantPlayId || "") === String(prev))) {
+        return prev;
+      }
+      return nextMarkets.find((item) => item?.merchantPlayId != null)?.merchantPlayId || "";
+    });
     setSelectedMarketId((prev) => {
       if (prev && nextMarkets.some((item) => item?.pmMarketId === prev)) {
         return prev;
@@ -819,6 +830,7 @@ function PolymarketApp({ baseUrl, balance }) {
   const loadCategoryMarkets = useCallback(async ({ categoryId = "", page = 1, append = false, keyword = "" } = {}) => {
     if (!categoryId) {
       setSelectedCategory("");
+      setSelectedMerchantPlayId("");
       setSelectedMarketId("");
       setMarketPage(1);
       setMarketHasMore(false);
@@ -880,9 +892,26 @@ function PolymarketApp({ baseUrl, balance }) {
         setLastPriceRefreshAt(patchTime);
       }
       setData((prev) => {
-        const prices = upsertByKey(prev.prices, (row) => `${row.pmMarketId}:${row.outcomeIndex}`, patch);
+        const prices = upsertByKey(prev.prices, (row) => `${row.merchantPlayId || row.pmMarketId}:${row.outcomeIndex}`, patch);
+        const markets = Array.isArray(prev.markets) ? prev.markets.map((item) => {
+          if (!item) {
+            return item;
+          }
+          const matchByPlay = patch.merchantPlayId && String(item.merchantPlayId || "") === String(patch.merchantPlayId);
+          const matchByMarket = !patch.merchantPlayId && item.pmMarketId === patch.pmMarketId;
+          if (!matchByPlay && !matchByMarket) {
+            return item;
+          }
+          const previousRows = Array.isArray(item.latestPrices) ? item.latestPrices : [];
+          const nextRows = upsertByKey(previousRows, (row) => `${row.merchantPlayId || row.pmMarketId}:${row.outcomeIndex}`, patch);
+          return {
+            ...item,
+            latestPrices: nextRows,
+          };
+        }) : prev.markets;
         return {
           ...prev,
+          markets,
           prices,
         };
       });
@@ -952,6 +981,7 @@ function PolymarketApp({ baseUrl, balance }) {
           prices: [],
           results: [],
         });
+        setSelectedMerchantPlayId("");
         setSelectedMarketId("");
       } catch (err) {
         if (!cancelled) {
@@ -982,7 +1012,7 @@ function PolymarketApp({ baseUrl, balance }) {
     loadCategoryMarkets({ categoryId: selectedCategory, page: 1, append: false });
   }, [loadCategoryMarkets, selectedCategory]);
 
-  const { connected: wsConnected, syncMarketSubscriptions } = usePolymarketSocket({
+  const { connected: wsConnected, syncSubscriptions } = usePolymarketSocket({
     baseUrl,
     enabled: true,
     onRefresh: applySocketPatch,
@@ -1002,16 +1032,25 @@ function PolymarketApp({ baseUrl, balance }) {
       }
       return Array.from(new Set((Array.isArray(data.markets) ? data.markets : []).map((item) => item?.pmMarketId).filter(Boolean)));
     })();
-    syncMarketSubscriptions(currentPageMarketIds);
-  }, [activeTab, data.markets, data.results, orders, syncMarketSubscriptions, wsConnected]);
+    const currentPageMerchantPlayIds = activeTab === "markets"
+      ? Array.from(new Set((Array.isArray(data.markets) ? data.markets : []).map((item) => item?.merchantPlayId).filter(Boolean)))
+      : [];
+    syncSubscriptions({
+      pmMarketIds: currentPageMarketIds,
+      merchantPlayIds: currentPageMerchantPlayIds,
+    });
+  }, [activeTab, data.markets, data.results, orders, syncSubscriptions, wsConnected]);
 
   const selectedMarket = useMemo(() => {
-    const market = (Array.isArray(data.markets) ? data.markets : []).find((item) => item && item.pmMarketId === selectedMarketId) || null;
+    const rows = Array.isArray(data.markets) ? data.markets : [];
+    const market = rows.find((item) => item && String(item.merchantPlayId || "") === String(selectedMerchantPlayId))
+      || rows.find((item) => item && item.pmMarketId === selectedMarketId)
+      || null;
     if (!market) {
       return null;
     }
     return attachLatestPrices(market, data.prices);
-  }, [data.markets, data.prices, selectedMarketId]);
+  }, [data.markets, data.prices, selectedMarketId, selectedMerchantPlayId]);
   const graphSvg = useMemo(() => buildGraphSeriesSvg(Array.isArray(graphData?.series) ? graphData.series : []), [graphData]);
   const selectedMarketRows = useMemo(() => (
     selectedMarket ? getOutcomeRows(selectedMarket) : []
@@ -1040,12 +1079,44 @@ function PolymarketApp({ baseUrl, balance }) {
   }, [currentTradePrice, marketPosition]);
 
   useEffect(() => {
-    if (!selectedMarketId) {
+    const merchantPlayIds = Array.from(new Set((Array.isArray(data.markets) ? data.markets : []).map((item) => item?.merchantPlayId).filter(Boolean)));
+    if (merchantPlayIds.length === 0) {
+      setData((prev) => ({
+        ...prev,
+        prices: [],
+      }));
+      return;
+    }
+    let cancelled = false;
+    fetchPolymarketMerchantPrices(baseUrl, merchantPlayIds)
+      .then((res) => {
+        if (cancelled) {
+          return;
+        }
+        const rows = Array.isArray(res?.data) ? res.data : [];
+        const latestPriceAt = getLatestPriceUpdateAt(rows);
+        if (latestPriceAt > 0) {
+          lastPriceUpdateRef.current = latestPriceAt;
+          setLastPriceRefreshAt(latestPriceAt);
+        }
+        setData((prev) => ({
+          ...prev,
+          prices: rows,
+        }));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, data.markets]);
+
+  useEffect(() => {
+    if (!selectedMarket?.pmMarketId) {
       setMarketPosition(null);
       return;
     }
     let cancelled = false;
-    fetchPolymarketMarketPosition(baseUrl, selectedMarketId)
+    fetchPolymarketMarketPosition(baseUrl, selectedMarket.pmMarketId)
       .then((res) => {
         if (!cancelled) {
           setMarketPosition(res?.data || null);
@@ -1059,10 +1130,10 @@ function PolymarketApp({ baseUrl, balance }) {
     return () => {
       cancelled = true;
     };
-  }, [baseUrl, selectedMarketId]);
+  }, [baseUrl, selectedMarket]);
 
   useEffect(() => {
-    if (!selectedMarketId) {
+    if (!selectedMarket?.pmMarketId) {
       setSelectedPlayOrders([]);
       setSelectedPlayPinned(false);
       return;
@@ -1072,7 +1143,7 @@ function PolymarketApp({ baseUrl, balance }) {
     fetchPolymarketOrders(baseUrl, 1, 100)
       .then((res) => {
         if (cancelled) return;
-        const rows = (Array.isArray(res?.data) ? res.data : []).filter((item) => item?.pmMarketId === selectedMarketId);
+        const rows = (Array.isArray(res?.data) ? res.data : []).filter((item) => item?.pmMarketId === selectedMarket.pmMarketId);
         setSelectedPlayOrders(rows);
       })
       .catch(() => {
@@ -1088,7 +1159,7 @@ function PolymarketApp({ baseUrl, balance }) {
     return () => {
       cancelled = true;
     };
-  }, [baseUrl, selectedMarketId]);
+  }, [baseUrl, selectedMarket]);
 
   useEffect(() => {
     const selectedKey = getPinnedStorageKey(selectedMarket);
@@ -1105,42 +1176,12 @@ function PolymarketApp({ baseUrl, balance }) {
   }, [selectedMarket]);
 
   useEffect(() => {
-    if (!selectedMarketId) {
-      return;
-    }
-    let cancelled = false;
-    fetchPolymarketPrices(baseUrl, { page: 1, size: 20, pmMarketId: selectedMarketId })
-      .then((res) => {
-        if (cancelled) {
-          return;
-        }
-        const rows = Array.isArray(res?.data) ? res.data : [];
-        const latestPriceAt = getLatestPriceUpdateAt(rows);
-        if (latestPriceAt > 0) {
-          lastPriceUpdateRef.current = latestPriceAt;
-          setLastPriceRefreshAt(latestPriceAt);
-        }
-        setData((prev) => {
-          const otherRows = (Array.isArray(prev.prices) ? prev.prices : []).filter((row) => row?.pmMarketId !== selectedMarketId);
-          return {
-            ...prev,
-            prices: [...otherRows, ...rows],
-          };
-        });
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [baseUrl, selectedMarketId]);
-
-  useEffect(() => {
-    if (!detailOpen || !selectedMarketId) {
+    if (!detailOpen || !selectedMarket?.pmMarketId) {
       return;
     }
     let cancelled = false;
     setDetailLoading(true);
-    fetchPolymarketMarketTranslation(baseUrl, selectedMarketId, detailLang)
+    fetchPolymarketMarketTranslation(baseUrl, selectedMarket.pmMarketId, detailLang)
       .then((res) => {
         if (!cancelled) {
           setDetailTranslation(res?.data || null);
@@ -1159,7 +1200,7 @@ function PolymarketApp({ baseUrl, balance }) {
     return () => {
       cancelled = true;
     };
-  }, [baseUrl, detailLang, detailOpen, selectedMarketId]);
+  }, [baseUrl, detailLang, detailOpen, selectedMarket]);
 
   useEffect(() => {
     if (!selectedMarketRows.length) {
@@ -1239,6 +1280,7 @@ function PolymarketApp({ baseUrl, balance }) {
       return;
     }
     setSelectedCategory(category);
+    setSelectedMerchantPlayId("");
     setSelectedMarketId("");
     setMarketPage(1);
     setMarketHasMore(false);
@@ -1249,12 +1291,14 @@ function PolymarketApp({ baseUrl, balance }) {
     }));
   }, [selectedCategory]);
 
-  const handleMarketClick = useCallback((marketId) => {
-    if (!marketId || marketId === selectedMarketId) {
+  const handleMarketClick = useCallback((marketId, merchantPlayId = "") => {
+    const nextMerchantPlayId = merchantPlayId == null ? "" : String(merchantPlayId);
+    if ((!marketId || marketId === selectedMarketId) && nextMerchantPlayId === String(selectedMerchantPlayId || "")) {
       return;
     }
+    setSelectedMerchantPlayId(nextMerchantPlayId);
     setSelectedMarketId(marketId);
-  }, [selectedMarketId]);
+  }, [selectedMarketId, selectedMerchantPlayId]);
 
   const handleTogglePlayPin = useCallback(async () => {
     const selectedKey = getPinnedStorageKey(selectedMarket);
@@ -1283,13 +1327,16 @@ function PolymarketApp({ baseUrl, balance }) {
     }
   }, [pinSubmitting, selectedMarket, selectedPlayPinned]);
 
-  const handleTradeOutcomeClick = useCallback((e, marketId, outcomeIndex) => {
+  const handleTradeOutcomeClick = useCallback((e, marketId, merchantPlayId, outcomeIndex) => {
     e.stopPropagation();
     if (marketId && marketId !== selectedMarketId) {
       setSelectedMarketId(marketId);
     }
+    if (merchantPlayId != null && String(merchantPlayId) !== String(selectedMerchantPlayId || "")) {
+      setSelectedMerchantPlayId(String(merchantPlayId));
+    }
     setTradeOutcomeIndex(outcomeIndex);
-  }, [selectedMarketId]);
+  }, [selectedMarketId, selectedMerchantPlayId]);
 
   const handleOrderSubmit = useCallback(async () => {
     if (!selectedMarket || !selectedTradeRow || !tradeAmount || orderSubmitting) return;
@@ -1686,9 +1733,9 @@ function PolymarketApp({ baseUrl, balance }) {
                   const closedMarket = isClosedStatus(item.status);
                   return (
                     <article
-                      className={selectedMarketId === displayItem.pmMarketId ? "pm-board-card selected" : "pm-board-card"}
+                      className={String(selectedMerchantPlayId || "") === String(displayItem.merchantPlayId || "") ? "pm-board-card selected" : "pm-board-card"}
                       key={displayItem.pmMarketId || displayItem.id || index}
-                      onClick={() => handleMarketClick(displayItem.pmMarketId)}
+                      onClick={() => handleMarketClick(displayItem.pmMarketId, displayItem.merchantPlayId)}
                       role="button"
                       tabIndex={0}
                     >
@@ -1710,7 +1757,7 @@ function PolymarketApp({ baseUrl, balance }) {
                             {cardMeta.volumeLabel ? `交易额 ${cardMeta.volumeLabel}` : "交易额 -"} {cardMeta.dateLabel ? `· ${cardMeta.dateLabel}` : ""} {displayItem?.pmEventId ? `· 事件 ${displayItem.pmEventId}` : ""}
                           </div>
                         </div>
-                        {selectedPlayPinned && selectedMarketId === displayItem.pmMarketId ? (
+                        {selectedPlayPinned && String(selectedMerchantPlayId || "") === String(displayItem.merchantPlayId || "") ? (
                           <div className="pm-board-card-pin">已置顶</div>
                         ) : null}
                         <div className={`pm-board-status ${closedMarket ? "closed" : ""}`}>
@@ -1720,13 +1767,13 @@ function PolymarketApp({ baseUrl, balance }) {
                       <div className="pm-board-rows">
                         {rows.slice(0, 4).map((row) => {
                           const selectedOutcome =
-                            selectedMarketId === displayItem.pmMarketId && Number(row.outcomeIndex) === Number(selectedTradeRow?.outcomeIndex);
+                            String(selectedMerchantPlayId || "") === String(displayItem.merchantPlayId || "") && Number(row.outcomeIndex) === Number(selectedTradeRow?.outcomeIndex);
                           return (
                             <button
                               type="button"
                               className={selectedOutcome ? "pm-board-row is-selected" : "pm-board-row"}
                               key={row.key}
-                              onClick={(e) => handleTradeOutcomeClick(e, displayItem.pmMarketId, row.outcomeIndex)}
+                              onClick={(e) => handleTradeOutcomeClick(e, displayItem.pmMarketId, displayItem.merchantPlayId, row.outcomeIndex)}
                               disabled={closedMarket}
                             >
                               <div className="pm-board-row-main">

@@ -78,6 +78,21 @@ export async function fetchPolymarketMerchantPlayDetail(baseUrl, merchantPlayId,
   return { url, data: unwrapData(json) || null };
 }
 
+export async function fetchPolymarketMerchantPrices(baseUrl, merchantPlayIds = []) {
+  const ids = Array.isArray(merchantPlayIds)
+    ? merchantPlayIds.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  if (ids.length === 0) {
+    return { url: "", data: [], meta: { page: 1, size: 0, total: 0 } };
+  }
+  const { url, json } = await requestJson(
+    baseUrl,
+    `/polymarket/merchant/prices?merchantPlayIds=${encodeURIComponent(ids.join(","))}`
+  );
+  const data = unwrapData(json);
+  return { url, data: Array.isArray(data) ? data : [], meta: unwrapPageMeta(json) };
+}
+
 export async function fetchPolymarketEvents(baseUrl, category, page = 1, size = 20) {
   const suffix = category ? `&category=${encodeURIComponent(category)}` : "";
   const { url, json } = await requestJson(baseUrl, `/polymarket/events?page=${page}&size=${size}${suffix}`);

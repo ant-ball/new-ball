@@ -23,11 +23,11 @@ function resolveWsUrl(baseUrl) {
 /**
  * Polymarket WebSocket hook
  * - 连接时自动订阅 polymarket-refresh
- * - 调用 syncMarketSubscriptions(marketIds) 订阅当前页面 market 的价格推送
+ * - 调用 syncSubscriptions({ pmMarketIds, merchantPlayIds }) 订阅当前页面价格推送
  */
 export function usePolymarketSocket({ baseUrl, enabled, onRefresh, onConnectedChange }) {
   const wsRef = useRef(null);
-  const subscribedMarketsRef = useRef(new Set());
+  const subscribedRef = useRef({ marketIds: [], merchantPlayIds: [] });
   const onRefreshRef = useRef(onRefresh);
   const onConnectedChangeRef = useRef(onConnectedChange);
   const [connected, setConnected] = useState(false);
@@ -45,7 +45,7 @@ export function usePolymarketSocket({ baseUrl, enabled, onRefresh, onConnectedCh
       setConnected(false);
       const ws = wsRef.current;
       wsRef.current = null;
-      subscribedMarketsRef.current.clear();
+      subscribedRef.current = { marketIds: [], merchantPlayIds: [] };
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.close();
       }
@@ -121,7 +121,7 @@ export function usePolymarketSocket({ baseUrl, enabled, onRefresh, onConnectedCh
       cancelled = true;
       const current = wsRef.current;
       wsRef.current = null;
-      subscribedMarketsRef.current.clear();
+      subscribedRef.current = { marketIds: [], merchantPlayIds: [] };
       if (current && current.readyState === WebSocket.OPEN) {
         current.close();
       }
@@ -132,29 +132,35 @@ export function usePolymarketSocket({ baseUrl, enabled, onRefresh, onConnectedCh
     };
   }, [baseUrl, enabled]);
 
-  const syncMarketSubscriptions = useCallback((marketIds) => {
+  const syncSubscriptions = useCallback(({ pmMarketIds = [], merchantPlayIds = [] } = {}) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.warn("[usePolymarketSocket] WS 未连接，无法订阅 markets:", marketIds);
+      console.warn("[usePolymarketSocket] WS 未连接，无法设置 polymarket 订阅:", { pmMarketIds, merchantPlayIds });
       return;
     }
-    const nextMarkets = Array.isArray(marketIds)
-      ? marketIds.map((item) => String(item || "").trim()).filter(Boolean)
+    const nextMarkets = Array.isArray(pmMarketIds)
+      ? pmMarketIds.map((item) => String(item || "").trim()).filter(Boolean)
       : [];
-    const currentMarkets = Array.from(subscribedMarketsRef.current);
-    if (currentMarkets.length === nextMarkets.length
-      && currentMarkets.every((item, index) => item === nextMarkets[index])) {
+    const nextMerchantPlays = Array.isArray(merchantPlayIds)
+      ? merchantPlayIds.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    const current = subscribedRef.current || { marketIds: [], merchantPlayIds: [] };
+    if (current.marketIds.length === nextMarkets.length
+      && current.marketIds.every((item, index) => item === nextMarkets[index])
+      && current.merchantPlayIds.length === nextMerchantPlays.length
+      && current.merchantPlayIds.every((item, index) => item === nextMerchantPlays[index])) {
       return;
     }
-    subscribedMarketsRef.current = new Set(nextMarkets);
+    subscribedRef.current = { marketIds: nextMarkets, merchantPlayIds: nextMerchantPlays };
     const token = getStoredBallToken();
     ws.send(JSON.stringify({
       type: "subscribe_markets",
       pmMarketIds: nextMarkets,
+      merchantPlayIds: nextMerchantPlays,
       token: token || "",
     }));
-    console.log("[usePolymarketSocket] 设置 market 订阅:", nextMarkets);
+    console.log("[usePolymarketSocket] 设置 polymarket 订阅:", { pmMarketIds: nextMarkets, merchantPlayIds: nextMerchantPlays });
   }, []);
 
-  return { connected, syncMarketSubscriptions };
+  return { connected, syncSubscriptions };
 }
