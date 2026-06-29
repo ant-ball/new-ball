@@ -195,10 +195,27 @@ export async function createPolymarketOrder(baseUrl, orderData) {
   return { url, data: unwrapData(json) || json };
 }
 
+export async function createPolymarketMerchantOrder(baseUrl, orderData) {
+  const { url, json } = await requestJson(baseUrl, "/polymarket/merchant/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(orderData),
+  });
+  return { url, data: unwrapData(json) || json };
+}
+
 export async function fetchPolymarketMarketPosition(baseUrl, pmMarketId, selectionCode = "") {
   const query = selectionCode
     ? `/polymarket/market-position?pmMarketId=${encodeURIComponent(pmMarketId)}&selectionCode=${encodeURIComponent(selectionCode)}`
     : `/polymarket/market-position?pmMarketId=${encodeURIComponent(pmMarketId)}`;
+  const { url, json } = await requestJson(baseUrl, query);
+  return { url, data: unwrapData(json) || null };
+}
+
+export async function fetchPolymarketMerchantMarketPosition(baseUrl, merchantPlayId, selectionCode = "") {
+  const query = selectionCode
+    ? `/polymarket/merchant/market-position?merchantPlayId=${encodeURIComponent(merchantPlayId)}&selectionCode=${encodeURIComponent(selectionCode)}`
+    : `/polymarket/merchant/market-position?merchantPlayId=${encodeURIComponent(merchantPlayId)}`;
   const { url, json } = await requestJson(baseUrl, query);
   return { url, data: unwrapData(json) || null };
 }
@@ -211,6 +228,15 @@ export async function fetchPolymarketMarketTranslation(baseUrl, pmMarketId, lang
 
 export async function closePolymarketPosition(baseUrl, payload) {
   const { url, json } = await requestJson(baseUrl, "/polymarket/close-position", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return { url, data: unwrapData(json) || json };
+}
+
+export async function closePolymarketMerchantPosition(baseUrl, payload) {
+  const { url, json } = await requestJson(baseUrl, "/polymarket/merchant/close-position", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

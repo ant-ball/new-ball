@@ -5,9 +5,12 @@ import {
   fetchPolymarketMerchantPrices,
   fetchPolymarketGraph,
   createPolymarketOrder,
+  createPolymarketMerchantOrder,
   fetchPolymarketMarketPosition,
+  fetchPolymarketMerchantMarketPosition,
   fetchPolymarketMarketTranslation,
   closePolymarketPosition,
+  closePolymarketMerchantPosition,
   fetchPolymarketOrders,
   fetchPolymarketHistoryMarkets,
   fetchPolymarketResults,
@@ -1143,7 +1146,10 @@ function PolymarketApp({ baseUrl, balance }) {
       return;
     }
     let cancelled = false;
-    fetchPolymarketMarketPosition(baseUrl, selectedMarket.pmMarketId)
+    const positionRequest = selectedMarket?.merchantPlayId
+      ? fetchPolymarketMerchantMarketPosition(baseUrl, selectedMarket.merchantPlayId)
+      : fetchPolymarketMarketPosition(baseUrl, selectedMarket.pmMarketId);
+    positionRequest
       .then((res) => {
         if (!cancelled) {
           setMarketPosition(res?.data || null);
@@ -1385,36 +1391,67 @@ function PolymarketApp({ baseUrl, balance }) {
     try {
       const tokenIds = parseTokenIds(selectedMarket);
       const tokenId = tokenIds[selectedTradeRow.outcomeIndex] || "";
+      const isMerchantPlay = selectedMarket?.merchantPlayId != null && String(selectedMarket.merchantPlayId) !== "";
       if (tradeSide === "SELL") {
         const positionSize = Number(marketPosition?.size || 0);
         if (!positionSize || positionSize <= 0) {
           throw new Error("当前没有可卖出的持仓");
         }
         const sizeToSell = orderAmountNum / currentTradePrice;
-        await closePolymarketPosition(baseUrl, {
-          pmMarketId: selectedMarket.pmMarketId,
-          selectionCode: selectedTradeRow.rawLabel,
-          selectionName: selectedTradeRow.rawLabel,
-          size: sizeToSell,
-          price: currentTradePrice,
-        });
+        if (isMerchantPlay) {
+          await closePolymarketMerchantPosition(baseUrl, {
+            merchantPlayId: selectedMarket.merchantPlayId,
+            itemId: selectedMarket.merchantPlayId,
+            selectionCode: selectedTradeRow.rawLabel,
+            selectionName: selectedTradeRow.rawLabel,
+            size: sizeToSell,
+            price: currentTradePrice,
+          });
+        } else {
+          await closePolymarketPosition(baseUrl, {
+            pmMarketId: selectedMarket.pmMarketId,
+            selectionCode: selectedTradeRow.rawLabel,
+            selectionName: selectedTradeRow.rawLabel,
+            size: sizeToSell,
+            price: currentTradePrice,
+          });
+        }
       } else {
-        await createPolymarketOrder(baseUrl, {
-          pmEventId: selectedMarket.pmEventId,
-          pmMarketId: selectedMarket.pmMarketId,
-          tokenId,
-          selectionCode: selectedTradeRow.rawLabel,
-          selectionName: selectedTradeRow.rawLabel,
-          orderSide: "BUY",
-          orderType: "MARKET",
-          orderPrice: currentTradePrice,
-          orderAmount: orderAmountNum,
-          orderSize: estimatedShares,
-        });
+        if (isMerchantPlay) {
+          await createPolymarketMerchantOrder(baseUrl, {
+            merchantPlayId: selectedMarket.merchantPlayId,
+            itemId: selectedMarket.merchantPlayId,
+            pmEventId: selectedMarket.pmEventId,
+            pmMarketId: selectedMarket.pmMarketId,
+            tokenId,
+            selectionCode: selectedTradeRow.rawLabel,
+            selectionName: selectedTradeRow.rawLabel,
+            orderSide: "BUY",
+            orderType: "MARKET",
+            orderPrice: currentTradePrice,
+            orderAmount: orderAmountNum,
+            orderSize: estimatedShares,
+          });
+        } else {
+          await createPolymarketOrder(baseUrl, {
+            pmEventId: selectedMarket.pmEventId,
+            pmMarketId: selectedMarket.pmMarketId,
+            tokenId,
+            selectionCode: selectedTradeRow.rawLabel,
+            selectionName: selectedTradeRow.rawLabel,
+            orderSide: "BUY",
+            orderType: "MARKET",
+            orderPrice: currentTradePrice,
+            orderAmount: orderAmountNum,
+            orderSize: estimatedShares,
+          });
+        }
       }
       alert(`${tradeSide === "BUY" ? "买入" : "卖出"}成功`);
       setActiveTab("orders");
-      const positionRes = await fetchPolymarketMarketPosition(baseUrl, selectedMarket.pmMarketId);
+      const positionRes = isMerchantPlay
+        ? await fetchPolymarketMerchantMarketPosition(baseUrl, selectedMarket.merchantPlayId)
+        : await fetchPolymarketMarketPosition(baseUrl, selectedMarket.pmMarketId);
       setMarketPosition(positionRes?.data || null);
       if (typeof window.refreshBalance === "function") {
         window.refreshBalance();
