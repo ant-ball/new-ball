@@ -1526,21 +1526,36 @@ function PolymarketApp({ baseUrl, balance }) {
     }
     try {
       setOrderSubmitting(true);
-      await closePolymarketPosition(baseUrl, {
-        pmMarketId: order.pmMarketId,
-        selectionCode: order.selectionCode,
-        selectionName: order.selectionName,
-        sourceOrderNo: order.orderNo,
-        size: draftSize,
-        price: currentPrice,
-      });
+      const isMerchantPlay = order?.merchantPlayId != null && String(order.merchantPlayId) !== "";
+      if (isMerchantPlay) {
+        await closePolymarketMerchantPosition(baseUrl, {
+          merchantPlayId: order.merchantPlayId,
+          itemId: order.merchantPlayId,
+          selectionCode: order.selectionCode,
+          selectionName: order.selectionName,
+          sourceOrderNo: order.orderNo,
+          size: draftSize,
+          price: currentPrice,
+        });
+      } else {
+        await closePolymarketPosition(baseUrl, {
+          pmMarketId: order.pmMarketId,
+          selectionCode: order.selectionCode,
+          selectionName: order.selectionName,
+          sourceOrderNo: order.orderNo,
+          size: draftSize,
+          price: currentPrice,
+        });
+      }
       setOrderSellDrafts((prev) => ({
         ...prev,
         [order.orderNo]: "",
       }));
       await loadOrders({ page: 1, append: false });
       if (selectedMarket?.pmMarketId === order.pmMarketId) {
-        const positionRes = await fetchPolymarketMarketPosition(baseUrl, order.pmMarketId, order.selectionCode || order.selectionName || "");
+        const positionRes = isMerchantPlay
+          ? await fetchPolymarketMerchantMarketPosition(baseUrl, order.merchantPlayId, order.selectionCode || order.selectionName || "")
+          : await fetchPolymarketMarketPosition(baseUrl, order.pmMarketId, order.selectionCode || order.selectionName || "");
         setMarketPosition(positionRes?.data || null);
       }
       if (typeof window.refreshBalance === "function") {
