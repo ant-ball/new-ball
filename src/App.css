@@ -782,6 +782,13 @@
   color: #111827;
 }
 
+.pm-board-card-subtitle {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
+}
+
 .pm-board-card-meta {
   margin-top: 10px;
   font-size: 12px;

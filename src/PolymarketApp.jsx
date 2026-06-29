@@ -22,7 +22,7 @@ const ORDER_PAGE_SIZE = 20;
 const RESULT_PAGE_SIZE = 20;
 const TABS = [
   { key: "markets", label: "市场" },
-  { key: "orders", label: "当前委托" },
+  { key: "orders", label: "当前持仓" },
   { key: "results", label: "历史记录" },
 ];
 const MARKET_VIEW_MODES = [
@@ -306,11 +306,37 @@ function formatShortDate(value) {
 }
 
 function getEventTitle(item) {
-  return translateDynamicText(item?.title || item?.slug || item?.question || item?.description || item?.pmEventId || "预测市场");
+  return translateDynamicText(item?.eventTitle || item?.title || item?.slug || item?.question || item?.description || item?.pmEventId || "预测市场");
 }
 
 function getCardTitle(item) {
-  return translateDynamicText(item?.question || item?.description || item?.title || item?.slug || item?.selectionName || item?.selectionCode || item?.pmMarketId || "预测市场");
+  return translateDynamicText(
+    item?.marketTitleCn
+      || item?.marketQuestion
+      || item?.title
+      || item?.question
+      || item?.content
+      || item?.description
+      || item?.slug
+      || item?.selectionName
+      || item?.selectionCode
+      || item?.pmMarketId
+      || "预测市场"
+  );
+}
+
+function getCardSubtitle(item) {
+  if (!item || typeof item !== "object") return "";
+  const segments = [
+    item?.selectionName || item?.selectionCode,
+    item?.eventTitle,
+    item?.subTitle,
+    item?.sourceCategory,
+  ]
+    .map((value) => translateDynamicText(value))
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean);
+  return segments.join(" · ");
 }
 
 function getMarketImage(item) {
@@ -2108,7 +2134,10 @@ function PolymarketApp({ baseUrl, balance }) {
                 <article className="pm-board-card" key={item.orderNo || item.id || index}>
                   <div className="pm-board-card-top">
                     <div className="pm-board-card-title-wrap">
-                      <h3 className="pm-board-card-title">{translateDynamicText(item.selectionName || item.selectionCode || "当前委托")}</h3>
+                      <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
+                      {getCardSubtitle(item) ? (
+                        <div className="pm-board-card-subtitle">{getCardSubtitle(item)}</div>
+                      ) : null}
                       <div className="pm-board-card-meta">
                         {formatBeijingTime(item.createdAt)} · {formatStatusLabel(item.settleStatus || "OPEN")}
                       </div>
@@ -2239,6 +2268,9 @@ function PolymarketApp({ baseUrl, balance }) {
                         ) : null}
                         <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
                       </div>
+                      {getCardSubtitle(item) ? (
+                        <div className="pm-board-card-subtitle">{getCardSubtitle(item)}</div>
+                      ) : null}
                       <div className="pm-board-card-meta">
                         北京时间 {formatBeijingTime(item.createdAt)} · {translateCategoryLabel(item.category)}
                       </div>
@@ -2302,6 +2334,9 @@ function PolymarketApp({ baseUrl, balance }) {
                       ) : null}
                       <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
                     </div>
+                    {getCardSubtitle(item) ? (
+                      <div className="pm-board-card-subtitle">{getCardSubtitle(item)}</div>
+                    ) : null}
                     <div className="pm-board-card-meta">
                       {cardMeta.volumeLabel ? `交易额 ${cardMeta.volumeLabel}` : "交易额 -"} {cardMeta.dateLabel ? `· ${cardMeta.dateLabel}` : ""} {item?.pmEventId ? `· 事件 ${item.pmEventId}` : ""}
                     </div>
