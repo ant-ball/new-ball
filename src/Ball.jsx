@@ -4337,7 +4337,7 @@ export default function SoccerEarlyMarketPage() {
                                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                                     <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}>
                                         <tr>
-                                            {["时间", "类型", "方向", "币种", "交易对", "金额", "变动后", "余额类型"].map((title) => (
+                                            {["时间", "类型", "方向", "币种", "交易对", "市场/持仓", "金额", "变动后", "余额类型"].map((title) => (
                                                 <th key={title} style={{ textAlign: "left", padding: "10px 12px", borderBottom: "1px solid #e5e7eb", color: "#475569", fontWeight: 700 }}>
                                                     {title}
                                                 </th>
@@ -4363,6 +4363,20 @@ export default function SoccerEarlyMarketPage() {
                                                     </td>
                                                     <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9" }}>
                                                         {item?.symbol ?? "-"}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9", minWidth: 220 }}>
+                                                        {item?.positionSummary ? (
+                                                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                                                <div style={{ fontWeight: 600, color: "#0f172a" }}>{item.positionSummary}</div>
+                                                                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#64748b" }}>
+                                                                    <span>Outcome: {item?.outcome ?? "-"}</span>
+                                                                    <span>Size: {item?.positionSize ?? "-"}</span>
+                                                                    <span>Entry: {item?.entryPrice ?? "-"}</span>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            "-"
+                                                        )}
                                                     </td>
                                                     <td style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9", fontWeight: 600 }}>
                                                         {item?.amount ?? "-"}
