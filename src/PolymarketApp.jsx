@@ -1411,7 +1411,7 @@ function PolymarketApp({ baseUrl, balance }) {
     } finally {
       setOrderSubmitting(false);
     }
-  }, [availableBalance, baseUrl, currentTradePrice, estimatedShares, loadLocalOrders, marketPosition, orderSubmitting, selectedMarket, selectedTradeRow, tradeAmount, tradeAmountNumber, tradeSide]);
+  }, [availableBalance, baseUrl, currentTradePrice, estimatedShares, marketPosition, orderSubmitting, selectedMarket, selectedTradeRow, tradeAmount, tradeAmountNumber, tradeSide]);
 
   const loadPositions = useCallback(async ({ page = 1, append = false } = {}) => {
     setPositionsLoading(true);
