@@ -1122,12 +1122,16 @@ function PolymarketApp({ baseUrl, balance }) {
       setSelectedPlayPinned(false);
       return;
     }
+    if (!selectedMarket?.merchantPlayId) {
+      setSelectedPlayOrders([]);
+      return;
+    }
     let cancelled = false;
     setSelectedPlayOrdersLoading(true);
-    fetchPolymarketOrders(baseUrl, 1, 100)
+    fetchPolymarketPlayOrders(baseUrl, selectedMarket.merchantPlayId)
       .then((res) => {
         if (cancelled) return;
-        const rows = (Array.isArray(res?.data) ? res.data : []).filter((item) => item?.pmMarketId === selectedMarket.pmMarketId);
+        const rows = Array.isArray(res?.data) ? res.data : [];
         setSelectedPlayOrders(rows);
       })
       .catch(() => {
