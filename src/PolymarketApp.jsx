@@ -9,9 +9,8 @@ import {
   fetchPolymarketMarketPosition,
   fetchPolymarketMarketTranslation,
   closePolymarketPosition,
-  fetchPolymarketOrders,
-  fetchPolymarketHistoryMarkets,
-  fetchPolymarketResults,
+  fetchPolymarketPositions,
+  fetchPolymarketLocalOrders,
   fetchPolymarketPlayOrders,
   updatePolymarketPlayPin,
 } from "./polymarketApi";
@@ -23,42 +22,12 @@ const RESULT_PAGE_SIZE = 20;
 const TABS = [
   { key: "markets", label: "市场" },
   { key: "orders", label: "当前持仓" },
-  { key: "results", label: "历史记录" },
+  { key: "openOrders", label: "当前委托" },
+  { key: "results", label: "历史委托" },
 ];
 const MARKET_VIEW_MODES = [
   { key: "direct", label: "直达市场" },
   { key: "events", label: "事件视图" },
-];
-const HISTORY_TYPES = [
-  { key: "markets", label: "历史盘口" },
-  { key: "bills", label: "历史账单" },
-];
-const BILL_FLOW_TYPES = [
-  { key: "", label: "类型 全部" },
-  { key: "CREATE", label: "买入" },
-  { key: "MANUAL_CLOSE", label: "卖出" },
-  { key: "SETTLE", label: "结算" },
-  { key: "SETTLE_REVIEW", label: "审核" },
-];
-const BILL_STATUS_TYPES = [
-  { key: "", label: "状态 全部" },
-  { key: "OPEN", label: "待结算" },
-  { key: "MANUAL_CLOSED", label: "已卖出" },
-  { key: "WIN", label: "已中奖" },
-  { key: "LOSE", label: "未命中" },
-  { key: "SETTLED", label: "已结算" },
-  { key: "PENDING_REVIEW", label: "待审核" },
-];
-const BILL_RESOLVED_TYPES = [
-  { key: "", label: "结算结果 全部" },
-  { key: "YES", label: "是" },
-  { key: "NO", label: "否" },
-];
-const BILL_DATE_PRESETS = [
-  { key: "", label: "全部" },
-  { key: "yesterday", label: "昨日" },
-  { key: "week", label: "近一周" },
-  { key: "month", label: "本月" },
 ];
 const GRAPH_RANGES = [
   { key: "1h", label: "1小时" },
@@ -119,16 +88,6 @@ function formatStatusLabel(status) {
   if (normalized === "LOSE") return "未命中";
   if (normalized === "PENDING") return "处理中";
   return status;
-}
-
-function formatFlowTypeLabel(value) {
-  const normalized = String(value || "").trim().toUpperCase();
-  if (!normalized) return "账单";
-  if (normalized === "CREATE") return "买入";
-  if (normalized === "MANUAL_CLOSE") return "卖出";
-  if (normalized === "SETTLE") return "结算";
-  if (normalized === "SETTLE_REVIEW") return "审核";
-  return value;
 }
 
 function resolveSettlementDate(order) {
@@ -497,29 +456,6 @@ function formatBillPnl(value, currency = "USDC") {
   return `${num > 0 ? "+" : ""}${num.toFixed(4).replace(/\.?0+$/, "")} ${currency}`;
 }
 
-function getBillDateRange(preset) {
-  const pad = (value) => String(value).padStart(2, "0");
-  const formatDateTime = (date, endOfDay = false) => (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${endOfDay ? "23:59:59" : "00:00:00"}`
-  );
-  const now = new Date();
-  if (preset === "yesterday") {
-    const date = new Date(now);
-    date.setDate(now.getDate() - 1);
-    return { dateFrom: formatDateTime(date, false), dateTo: formatDateTime(date, true) };
-  }
-  if (preset === "week") {
-    const from = new Date(now);
-    from.setDate(now.getDate() - 6);
-    return { dateFrom: formatDateTime(from, false), dateTo: formatDateTime(now, true) };
-  }
-  if (preset === "month") {
-    const from = new Date(now.getFullYear(), now.getMonth(), 1);
-    return { dateFrom: formatDateTime(from, false), dateTo: formatDateTime(now, true) };
-  }
-  return { dateFrom: "", dateTo: "" };
-}
-
 function getRemainingOrderSize(order) {
   const candidates = [order?.remainingSize, order?.filledSize, order?.orderSize];
   for (const candidate of candidates) {
@@ -746,6 +682,14 @@ function parseTokenIds(item) {
   return [];
 }
 
+function getOrderDraftKey(item) {
+  if (!item) return "";
+  return String(
+    item.orderNo
+    || `${item.pmMarketId || ""}:${item.selectionCode || item.selectionName || item.tokenId || item.id || ""}`
+  );
+}
+
 function PolymarketApp({ baseUrl, balance }) {
   const availableBalance = parseFloat(balance?.amount || 0) - parseFloat(balance?.froze || 0);
   const lastPriceUpdateRef = useRef(0);
@@ -774,25 +718,23 @@ function PolymarketApp({ baseUrl, balance }) {
   const [detailLang, setDetailLang] = useState("zh-CN");
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTranslation, setDetailTranslation] = useState(null);
-  const [orders, setOrders] = useState([]);
+  const [positions, setPositions] = useState([]);
+  const [localOrders, setLocalOrders] = useState([]);
   const [selectedPlayOrders, setSelectedPlayOrders] = useState([]);
   const [selectedPlayOrdersLoading, setSelectedPlayOrdersLoading] = useState(false);
   const [selectedPlayPinned, setSelectedPlayPinned] = useState(false);
   const [pinSubmitting, setPinSubmitting] = useState(false);
   const [orderSellDrafts, setOrderSellDrafts] = useState({});
   const [orderSellModes, setOrderSellModes] = useState({});
-  const [ordersLoading, setOrdersLoading] = useState(false);
-  const [ordersPage, setOrdersPage] = useState(1);
-  const [ordersHasMore, setOrdersHasMore] = useState(false);
+  const [positionsLoading, setPositionsLoading] = useState(false);
+  const [positionsPage, setPositionsPage] = useState(1);
+  const [positionsHasMore, setPositionsHasMore] = useState(false);
+  const [localOrdersLoading, setLocalOrdersLoading] = useState(false);
+  const [localOrdersPage, setLocalOrdersPage] = useState(1);
+  const [localOrdersHasMore, setLocalOrdersHasMore] = useState(false);
   const [resultsLoading, setResultsLoading] = useState(false);
   const [resultsPage, setResultsPage] = useState(1);
   const [resultsHasMore, setResultsHasMore] = useState(false);
-  const [historyType, setHistoryType] = useState("markets");
-  const [billKeyword, setBillKeyword] = useState("");
-  const [billFlowType, setBillFlowType] = useState("");
-  const [billStatus, setBillStatus] = useState("");
-  const [billResolvedOutcome, setBillResolvedOutcome] = useState("");
-  const [billDatePreset, setBillDatePreset] = useState("");
   const [marketPage, setMarketPage] = useState(1);
   const [marketHasMore, setMarketHasMore] = useState(false);
   const [loadingMoreMarkets, setLoadingMoreMarkets] = useState(false);
@@ -1038,7 +980,7 @@ function PolymarketApp({ baseUrl, balance }) {
           prices,
         };
       });
-      setOrders((prev) => prev.map((item) => {
+      setPositions((prev) => prev.map((item) => {
         if (!item || item.pmMarketId !== patch.pmMarketId) {
           return item;
         }
@@ -1152,7 +1094,10 @@ function PolymarketApp({ baseUrl, balance }) {
     }
     const currentPageMarketIds = (() => {
       if (activeTab === "orders") {
-        return Array.from(new Set((Array.isArray(orders) ? orders : []).map((item) => item?.pmMarketId).filter(Boolean)));
+        return Array.from(new Set((Array.isArray(positions) ? positions : []).map((item) => item?.pmMarketId).filter(Boolean)));
+      }
+      if (activeTab === "openOrders") {
+        return Array.from(new Set((Array.isArray(localOrders) ? localOrders : []).map((item) => item?.pmMarketId).filter(Boolean)));
       }
       if (activeTab === "results") {
         return Array.from(new Set((Array.isArray(data.results) ? data.results : []).map((item) => item?.pmMarketId).filter(Boolean)));
@@ -1160,7 +1105,7 @@ function PolymarketApp({ baseUrl, balance }) {
       return Array.from(new Set((Array.isArray(data.markets) ? data.markets : []).map((item) => item?.pmMarketId).filter(Boolean)));
     })();
     syncMarketSubscriptions(currentPageMarketIds);
-  }, [activeTab, data.markets, data.results, orders, syncMarketSubscriptions, wsConnected]);
+  }, [activeTab, data.markets, data.results, localOrders, positions, syncMarketSubscriptions, wsConnected]);
 
   const selectedMarket = useMemo(() => {
     const market = (Array.isArray(data.markets) ? data.markets : []).find((item) => item && item.pmMarketId === selectedMarketId) || null;
@@ -1345,14 +1290,12 @@ function PolymarketApp({ baseUrl, balance }) {
     if (activeTab === "markets") return data.markets;
     if (activeTab === "graph") return [];
     if (activeTab === "results") return data.results;
-    if (activeTab === "orders") return orders;
+    if (activeTab === "openOrders") return localOrders;
+    if (activeTab === "orders") return positions;
     return data.markets;
-  }, [activeTab, data.markets, data.results, orders]);
+  }, [activeTab, data.markets, data.results, localOrders, positions]);
 
   const filteredCurrentList = useMemo(() => {
-    if (activeTab === "results") {
-      return currentList;
-    }
     const keyword = String(searchQuery || "").trim().toLowerCase();
     if (!keyword) return currentList;
     return currentList.filter((item) => {
@@ -1363,7 +1306,7 @@ function PolymarketApp({ baseUrl, balance }) {
   }, [currentList, searchQuery]);
 
   useEffect(() => {
-    if (!loading && !error && !["markets", "graph", "results", "orders"].includes(activeTab)) {
+    if (!loading && !error && !["markets", "graph", "results", "orders", "openOrders"].includes(activeTab)) {
       setActiveTab("markets");
     }
   }, [activeTab, error, loading]);
@@ -1510,6 +1453,7 @@ function PolymarketApp({ baseUrl, balance }) {
       }
       alert(`${tradeSide === "BUY" ? "买入" : "卖出"}成功`);
       setActiveTab("orders");
+      await loadLocalOrders({ page: 1, append: false, scope: "current" });
       const positionRes = await fetchPolymarketMarketPosition(baseUrl, selectedMarket.pmMarketId);
       setMarketPosition(positionRes?.data || null);
       if (typeof window.refreshBalance === "function") {
@@ -1520,51 +1464,82 @@ function PolymarketApp({ baseUrl, balance }) {
     } finally {
       setOrderSubmitting(false);
     }
-  }, [availableBalance, baseUrl, currentTradePrice, estimatedShares, marketPosition, orderSubmitting, selectedMarket, selectedTradeRow, tradeAmount, tradeAmountNumber, tradeSide]);
+  }, [availableBalance, baseUrl, currentTradePrice, estimatedShares, loadLocalOrders, marketPosition, orderSubmitting, selectedMarket, selectedTradeRow, tradeAmount, tradeAmountNumber, tradeSide]);
 
-  const loadOrders = useCallback(async ({ page = 1, append = false } = {}) => {
-    setOrdersLoading(true);
+  const loadPositions = useCallback(async ({ page = 1, append = false } = {}) => {
+    setPositionsLoading(true);
     try {
-      const res = await fetchPolymarketOrders(baseUrl, page, ORDER_PAGE_SIZE);
+      const res = await fetchPolymarketPositions(baseUrl, page, ORDER_PAGE_SIZE);
       const rows = Array.isArray(res.data) ? res.data : [];
       const total = Number(res?.meta?.total ?? 0);
-      setOrdersPage(page);
-      setOrdersHasMore(page * ORDER_PAGE_SIZE < total);
-      setOrders((prev) => (append ? [...prev, ...rows] : rows));
+      setPositionsPage(page);
+      setPositionsHasMore(page * ORDER_PAGE_SIZE < total);
+      setPositions((prev) => (append ? [...prev, ...rows] : rows));
     } catch (err) {
-      console.warn("加载订单失败:", err);
+      console.warn("加载 Tiger 持仓失败:", err);
     } finally {
-      setOrdersLoading(false);
+      setPositionsLoading(false);
     }
   }, [baseUrl]);
 
-  const handleOrderSellDraftChange = useCallback((orderNo, value) => {
+  const loadLocalOrders = useCallback(async ({ page = 1, append = false, scope = "current" } = {}) => {
+    const history = scope === "history";
+    const setLoadingState = history ? setResultsLoading : setLocalOrdersLoading;
+    const setPageState = history ? setResultsPage : setLocalOrdersPage;
+    const setHasMoreState = history ? setResultsHasMore : setLocalOrdersHasMore;
+    const setRowsState = history
+      ? ((rows) => setData((prev) => ({ ...prev, results: rows })))
+      : setLocalOrders;
+    setLoadingState(true);
+    try {
+      const res = await fetchPolymarketLocalOrders(baseUrl, { page, size: RESULT_PAGE_SIZE, scope });
+      const rows = Array.isArray(res.data) ? res.data : [];
+      const total = Number(res?.meta?.total ?? 0);
+      setPageState(page);
+      setHasMoreState(page * RESULT_PAGE_SIZE < total);
+      if (history) {
+        setData((prev) => ({
+          ...prev,
+          results: append ? [...prev.results, ...rows] : rows,
+        }));
+      } else {
+        setRowsState((prev) => (append ? [...prev, ...rows] : rows));
+      }
+    } catch (err) {
+      console.warn(history ? "加载历史委托失败:" : "加载当前委托失败:", err);
+    } finally {
+      setLoadingState(false);
+    }
+  }, [baseUrl]);
+
+  const handleOrderSellDraftChange = useCallback((draftKey, value) => {
     setOrderSellDrafts((prev) => ({
       ...prev,
-      [orderNo]: value,
+      [draftKey]: value,
     }));
   }, []);
 
-  const handleOrderSellModeChange = useCallback((orderNo, mode) => {
+  const handleOrderSellModeChange = useCallback((draftKey, mode) => {
     setOrderSellModes((prev) => ({
       ...prev,
-      [orderNo]: mode,
+      [draftKey]: mode,
     }));
     setOrderSellDrafts((prev) => ({
       ...prev,
-      [orderNo]: "",
+      [draftKey]: "",
     }));
   }, []);
 
   const handleOrderSell = useCallback(async (order) => {
-    if (!order || !order.orderNo) {
+    if (!order || !order.pmMarketId) {
       return;
     }
+    const draftKey = getOrderDraftKey(order);
     const currentPrice = Number(order.currentPrice || 0);
     const remainingSize = getRemainingOrderSize(order);
     const maxAmount = currentPrice > 0 ? remainingSize * currentPrice : 0;
-    const sellMode = orderSellModes[order.orderNo] === "amount" ? "amount" : "size";
-    const draftValue = Number(orderSellDrafts[order.orderNo] || 0);
+    const sellMode = orderSellModes[draftKey] === "amount" ? "amount" : "size";
+    const draftValue = Number(orderSellDrafts[draftKey] || 0);
     if (!(draftValue > 0)) {
       alert(sellMode === "amount" ? "请输入卖出金额" : "请输入卖出份额");
       return;
@@ -1595,9 +1570,10 @@ function PolymarketApp({ baseUrl, balance }) {
       });
       setOrderSellDrafts((prev) => ({
         ...prev,
-        [order.orderNo]: "",
+        [draftKey]: "",
       }));
-      await loadOrders({ page: 1, append: false });
+      await loadPositions({ page: 1, append: false });
+      await loadLocalOrders({ page: 1, append: false, scope: "current" });
       if (selectedMarket?.pmMarketId === order.pmMarketId) {
         const positionRes = await fetchPolymarketMarketPosition(baseUrl, order.pmMarketId, order.selectionCode || order.selectionName || "");
         setMarketPosition(positionRes?.data || null);
@@ -1611,45 +1587,23 @@ function PolymarketApp({ baseUrl, balance }) {
     } finally {
       setOrderSubmitting(false);
     }
-  }, [baseUrl, loadOrders, orderSellDrafts, orderSellModes, selectedMarket?.pmMarketId]);
+  }, [baseUrl, loadLocalOrders, loadPositions, orderSellDrafts, orderSellModes, selectedMarket?.pmMarketId]);
 
   const loadResults = useCallback(async ({ page = 1, append = false } = {}) => {
-    setResultsLoading(true);
-    try {
-      const range = getBillDateRange(billDatePreset);
-      const res = historyType === "bills"
-        ? await fetchPolymarketResults(baseUrl, {
-            page,
-            size: RESULT_PAGE_SIZE,
-            category: selectedCategory,
-            keyword: billKeyword,
-            flowType: billFlowType,
-            status: billStatus,
-            resolvedOutcome: billResolvedOutcome,
-            dateFrom: range.dateFrom,
-            dateTo: range.dateTo,
-          })
-        : await fetchPolymarketHistoryMarkets(baseUrl, page, RESULT_PAGE_SIZE, selectedCategory, searchQuery);
-      const rows = Array.isArray(res.data) ? res.data : [];
-      const total = Number(res?.meta?.total ?? 0);
-      setResultsPage(page);
-      setResultsHasMore(page * RESULT_PAGE_SIZE < total);
-      setData((prev) => ({
-        ...prev,
-        results: append ? [...prev.results, ...rows] : rows,
-      }));
-    } catch (err) {
-      console.warn("加载历史记录失败:", err);
-    } finally {
-      setResultsLoading(false);
-    }
-  }, [baseUrl, billDatePreset, billFlowType, billKeyword, billResolvedOutcome, billStatus, historyType, searchQuery, selectedCategory]);
+    await loadLocalOrders({ page, append, scope: "history" });
+  }, [loadLocalOrders]);
 
   useEffect(() => {
     if (activeTab === "orders") {
-      loadOrders({ page: 1, append: false });
+      loadPositions({ page: 1, append: false });
     }
-  }, [activeTab, loadOrders]);
+  }, [activeTab, loadPositions]);
+
+  useEffect(() => {
+    if (activeTab === "openOrders") {
+      loadLocalOrders({ page: 1, append: false, scope: "current" });
+    }
+  }, [activeTab, loadLocalOrders]);
 
   useEffect(() => {
     if (activeTab === "results") {
@@ -1666,8 +1620,12 @@ function PolymarketApp({ baseUrl, balance }) {
       }
       return;
     }
-    if (activeTab === "orders" && !ordersLoading && ordersHasMore) {
-      loadOrders({ page: ordersPage + 1, append: true });
+    if (activeTab === "orders" && !positionsLoading && positionsHasMore) {
+      loadPositions({ page: positionsPage + 1, append: true });
+      return;
+    }
+    if (activeTab === "openOrders" && !localOrdersLoading && localOrdersHasMore) {
+      loadLocalOrders({ page: localOrdersPage + 1, append: true, scope: "current" });
       return;
     }
     if (activeTab === "results" && !resultsLoading && resultsHasMore) {
@@ -1677,15 +1635,19 @@ function PolymarketApp({ baseUrl, balance }) {
     activeTab,
     loadCategoryMarkets,
     loadEventMarkets,
-    loadOrders,
+    loadLocalOrders,
+    loadPositions,
     loadResults,
     loadingMoreMarkets,
     marketViewMode,
     marketHasMore,
     marketPage,
-    ordersHasMore,
-    ordersLoading,
-    ordersPage,
+    localOrdersHasMore,
+    localOrdersLoading,
+    localOrdersPage,
+    positionsHasMore,
+    positionsLoading,
+    positionsPage,
     resultsHasMore,
     resultsLoading,
     resultsPage,
@@ -1805,62 +1767,15 @@ function PolymarketApp({ baseUrl, balance }) {
         ))}
       </section>
 
-      {!loading && !error && activeTab === "results" ? (
+      {!loading && !error && activeTab !== "markets" ? (
         <section className="pm-board-history-filters">
-          <div className="pm-board-tabs" role="tablist" aria-label="历史类型">
-            {HISTORY_TYPES.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                className={historyType === item.key ? "pm-board-tab active" : "pm-board-tab"}
-                onClick={() => {
-                  setHistoryType(item.key);
-                  setResultsPage(1);
-                  setResultsHasMore(false);
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
+          <div className="pm-board-search-meta">
+            {activeTab === "orders"
+              ? "数据源：Tiger 持仓"
+              : activeTab === "openOrders"
+                ? "数据源：本地订单（当前委托）"
+                : "数据源：本地订单（历史委托）"}
           </div>
-          {historyType === "bills" ? (
-            <div className="pm-board-history-filter-grid">
-              <input
-                type="text"
-                value={billKeyword}
-                onChange={(e) => setBillKeyword(e.target.value)}
-                className="pm-board-search-input"
-                placeholder="搜索事件"
-              />
-              <select className="pm-board-filter-select" value={billFlowType} onChange={(e) => setBillFlowType(e.target.value)}>
-                {BILL_FLOW_TYPES.map((item) => (
-                  <option key={item.key || "all"} value={item.key}>{item.label}</option>
-                ))}
-              </select>
-              <select className="pm-board-filter-select" value={billStatus} onChange={(e) => setBillStatus(e.target.value)}>
-                {BILL_STATUS_TYPES.map((item) => (
-                  <option key={item.key || "all"} value={item.key}>{item.label}</option>
-                ))}
-              </select>
-              <select className="pm-board-filter-select" value={billResolvedOutcome} onChange={(e) => setBillResolvedOutcome(e.target.value)}>
-                {BILL_RESOLVED_TYPES.map((item) => (
-                  <option key={item.key || "all"} value={item.key}>{item.label}</option>
-                ))}
-              </select>
-              <div className="pm-board-filter-preset-group">
-                {BILL_DATE_PRESETS.map((item) => (
-                  <button
-                    key={item.key || "all"}
-                    type="button"
-                    className={billDatePreset === item.key ? "pm-board-filter-preset active" : "pm-board-filter-preset"}
-                    onClick={() => setBillDatePreset(item.key)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </section>
       ) : null}
 
@@ -2123,12 +2038,14 @@ function PolymarketApp({ baseUrl, balance }) {
       {!loading && !error && activeTab !== "markets" && filteredCurrentList.length > 0 ? (
         <section className="pm-board-grid">
           {filteredCurrentList.map((item, index) => {
-            if (activeTab === "orders") {
+            if (activeTab === "orders" || activeTab === "openOrders") {
+              const isTigerPosition = activeTab === "orders";
+              const draftKey = getOrderDraftKey(item);
               const currentPrice = Number(item.currentPrice || 0);
               const remainingSize = getRemainingOrderSize(item);
               const maxSellAmount = currentPrice > 0 ? remainingSize * currentPrice : 0;
-              const sellDraft = orderSellDrafts[item.orderNo] ?? "";
-              const sellMode = orderSellModes[item.orderNo] === "amount" ? "amount" : "size";
+              const sellDraft = orderSellDrafts[draftKey] ?? "";
+              const sellMode = orderSellModes[draftKey] === "amount" ? "amount" : "size";
               const canManualClose = !!item.canManualClose && currentPrice > 0 && remainingSize > 0;
               return (
                 <article className="pm-board-card" key={item.orderNo || item.id || index}>
@@ -2139,7 +2056,7 @@ function PolymarketApp({ baseUrl, balance }) {
                         <div className="pm-board-card-subtitle">{getCardSubtitle(item)}</div>
                       ) : null}
                       <div className="pm-board-card-meta">
-                        {formatBeijingTime(item.createdAt)} · {formatStatusLabel(item.settleStatus || "OPEN")}
+                        {isTigerPosition ? "Tiger 持仓" : "本地订单"} · {formatBeijingTime(item.createdAt)} · {formatStatusLabel(item.settleStatus || "OPEN")}
                       </div>
                     </div>
                     <div className={`pm-board-status ${String(item.settleStatus || "").toUpperCase() === "WIN" ? "win" : String(item.settleStatus || "").toUpperCase() === "LOSE" ? "lose" : ""}`}>
@@ -2162,6 +2079,10 @@ function PolymarketApp({ baseUrl, balance }) {
                     <div className="pm-board-order-cell">
                       <span>市场</span>
                       <strong>{item.pmMarketId || "-"}</strong>
+                    </div>
+                    <div className="pm-board-order-cell">
+                      <span>数据源</span>
+                      <strong>{isTigerPosition ? "Tiger Position" : "Local Order"}</strong>
                     </div>
                     <div className="pm-board-order-cell">
                       <span>{String(item.settleStatus || "").toUpperCase() === "SETTLED" || String(item.settleStatus || "").toUpperCase() === "WIN" || String(item.settleStatus || "").toUpperCase() === "LOSE" ? "结算时间" : "预计结算"}</span>
@@ -2200,14 +2121,14 @@ function PolymarketApp({ baseUrl, balance }) {
                         <button
                           type="button"
                           className={sellMode === "size" ? "pm-order-sell-mode-btn active" : "pm-order-sell-mode-btn"}
-                          onClick={() => handleOrderSellModeChange(item.orderNo, "size")}
+                          onClick={() => handleOrderSellModeChange(draftKey, "size")}
                         >
                           按份额
                         </button>
                         <button
                           type="button"
                           className={sellMode === "amount" ? "pm-order-sell-mode-btn active" : "pm-order-sell-mode-btn"}
-                          onClick={() => handleOrderSellModeChange(item.orderNo, "amount")}
+                          onClick={() => handleOrderSellModeChange(draftKey, "amount")}
                         >
                           按USDT
                         </button>
@@ -2219,7 +2140,7 @@ function PolymarketApp({ baseUrl, balance }) {
                           step="0.01"
                           className="pm-order-sell-input"
                           value={sellDraft}
-                          onChange={(e) => handleOrderSellDraftChange(item.orderNo, e.target.value)}
+                          onChange={(e) => handleOrderSellDraftChange(draftKey, e.target.value)}
                           placeholder={currentPrice > 0 ? (sellMode === "amount" ? "输入卖出金额" : "输入卖出份额") : "暂无买盘"}
                           disabled={currentPrice <= 0}
                         />
@@ -2227,7 +2148,7 @@ function PolymarketApp({ baseUrl, balance }) {
                           type="button"
                           className="pm-order-sell-ghost"
                           onClick={() => handleOrderSellDraftChange(
-                            item.orderNo,
+                            draftKey,
                             sellMode === "amount"
                               ? (maxSellAmount > 0 ? maxSellAmount.toFixed(8) : "")
                               : (remainingSize > 0 ? remainingSize.toFixed(8) : "")
@@ -2251,32 +2172,21 @@ function PolymarketApp({ baseUrl, balance }) {
               );
             }
 
-            if (activeTab === "results" && historyType === "bills") {
+            if (activeTab === "results") {
               return (
                 <article className="pm-board-card" key={item.orderNo || item.id || index}>
                   <div className="pm-board-card-top">
                     <div className="pm-board-card-title-wrap">
-                      <div className="pm-board-card-title-row">
-                        {getMarketImage(item) ? (
-                          <img
-                            src={getMarketImage(item)}
-                            alt=""
-                            className="pm-board-card-avatar"
-                            loading="lazy"
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : null}
-                        <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
-                      </div>
+                      <h3 className="pm-board-card-title">{getCardTitle(item)}</h3>
                       {getCardSubtitle(item) ? (
                         <div className="pm-board-card-subtitle">{getCardSubtitle(item)}</div>
                       ) : null}
                       <div className="pm-board-card-meta">
-                        北京时间 {formatBeijingTime(item.createdAt)} · {translateCategoryLabel(item.category)}
+                        本地订单 · 北京时间 {formatBeijingTime(item.createdAt)}
                       </div>
                     </div>
                     <div className="pm-board-status">
-                      {formatFlowTypeLabel(item.flowType)}
+                      {formatStatusLabel(item.settleStatus || item.orderStatus || "-")}
                     </div>
                   </div>
                   <div className="pm-board-order-grid">
@@ -2289,12 +2199,12 @@ function PolymarketApp({ baseUrl, balance }) {
                       <strong>{formatOutcomeLabel(item.selectionName || item.selectionCode || "-")}</strong>
                     </div>
                     <div className="pm-board-order-cell">
-                      <span>账单金额</span>
-                      <strong>{formatBillAmount(item.businessAmount, item.currency || "USDC")}</strong>
+                      <span>订单金额</span>
+                      <strong>{item.orderAmount || 0} {item.currency || "USDT"}</strong>
                     </div>
                     <div className="pm-board-order-cell">
-                      <span>账单盈亏</span>
-                      <strong>{formatBillPnl(item.pnlAmount, item.currency || "USDC")}</strong>
+                      <span>结算盈亏</span>
+                      <strong>{item.settlePnl != null ? `${item.settlePnl > 0 ? "+" : ""}${item.settlePnl}` : "-"}</strong>
                     </div>
                     <div className="pm-board-order-cell">
                       <span>下单价格</span>
@@ -2306,7 +2216,7 @@ function PolymarketApp({ baseUrl, balance }) {
                     </div>
                     <div className="pm-board-order-cell">
                       <span>状态</span>
-                      <strong>{formatStatusLabel(item.settleStatus || item.afterStatus || item.beforeStatus || "-")}</strong>
+                      <strong>{formatStatusLabel(item.settleStatus || item.orderStatus || "-")}</strong>
                     </div>
                     <div className="pm-board-order-cell">
                       <span>结算结果</span>
@@ -2363,20 +2273,28 @@ function PolymarketApp({ baseUrl, balance }) {
 
       {!loading && !error && activeTab !== "markets" && filteredCurrentList.length === 0 ? (
         <div className="pm-empty">
-          {activeTab === "orders" ? (ordersLoading ? "加载订单中..." : "暂无订单记录") : activeTab === "results" ? (resultsLoading ? "加载历史记录中..." : "暂无历史记录") : "当前没有可展示的数据。"}
+          {activeTab === "orders"
+            ? (positionsLoading ? "加载 Tiger 持仓中..." : "暂无 Tiger 持仓")
+            : activeTab === "openOrders"
+              ? (localOrdersLoading ? "加载当前委托中..." : "暂无当前委托")
+              : activeTab === "results"
+                ? (resultsLoading ? "加载历史委托中..." : "暂无历史委托")
+                : "当前没有可展示的数据。"}
         </div>
       ) : null}
 
       {!loading && !error && (
         <div className="pm-board-pagination">
-          {(activeTab === "orders" && ordersHasMore) || (activeTab === "results" && resultsHasMore) ? (
+          {(activeTab === "orders" && positionsHasMore)
+            || (activeTab === "openOrders" && localOrdersHasMore)
+            || (activeTab === "results" && resultsHasMore) ? (
             <button
               type="button"
               className="pm-board-load-more"
               onClick={handleLoadMore}
-              disabled={loadingMoreMarkets || ordersLoading || resultsLoading}
+              disabled={loadingMoreMarkets || positionsLoading || localOrdersLoading || resultsLoading}
             >
-              {loadingMoreMarkets || ordersLoading || resultsLoading ? "加载中..." : "加载更多"}
+              {loadingMoreMarkets || positionsLoading || localOrdersLoading || resultsLoading ? "加载中..." : "加载更多"}
             </button>
           ) : null}
         </div>

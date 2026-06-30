@@ -183,8 +183,20 @@ export async function closePolymarketPosition(baseUrl, payload) {
   return { url, data: unwrapData(json) || json };
 }
 
+export async function fetchPolymarketPositions(baseUrl, page = 1, size = 50) {
+  const { url, json } = await requestJson(baseUrl, `/polymarket/positions?page=${page}&size=${size}`);
+  return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
+}
+
 export async function fetchPolymarketOrders(baseUrl, page = 1, size = 50) {
-  const { url, json } = await requestJson(baseUrl, `/polymarket/orders?page=${page}&size=${size}`);
+  return fetchPolymarketPositions(baseUrl, page, size);
+}
+
+export async function fetchPolymarketLocalOrders(baseUrl, { page = 1, size = 50, scope = "current" } = {}) {
+  const { url, json } = await requestJson(
+    baseUrl,
+    `/polymarket/local-orders?page=${page}&size=${size}&scope=${encodeURIComponent(scope)}`
+  );
   return { url, data: unwrapPageRows(json), meta: unwrapPageMeta(json) };
 }
 
