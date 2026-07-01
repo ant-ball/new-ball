@@ -829,7 +829,7 @@ function PolymarketApp({ baseUrl, balance }) {
       const categoryRows = categories.length > 0 ? categories : await loadCategories();
       const resolvedCategoryId = categoryId || pickInitialCategory(categoryRows, "");
       const marketsRes = resolvedCategoryId
-        ? await fetchPolymarketMerchantPlays(baseUrl, { categoryId: resolvedCategoryId, keyword, page, size: PAGE_SIZE, lang: "zh-CN" })
+        ? await fetchPolymarketMerchantPlays(baseUrl, { categoryId: resolvedCategoryId, keyword, page, size: PAGE_SIZE, lang: detailLang })
         : { data: [], meta: { total: 0 } };
       const markets = Array.isArray(marketsRes.data) ? marketsRes.data : [];
       const total = Number(marketsRes?.meta?.total ?? 0);
@@ -853,7 +853,7 @@ function PolymarketApp({ baseUrl, balance }) {
         setLoading(false);
       }
     }
-  }, [baseUrl, categories, hydrateMarkets, loadCategories]);
+  }, [baseUrl, categories, detailLang, hydrateMarkets, loadCategories]);
 
   const applySocketPatch = useCallback((message) => {
     if (!message || typeof message !== "object") {
